@@ -157,3 +157,15 @@ TEST_CASE("The watch table online: values, Set all, Force and Unforce") {
     ui.clickWidget("unforce 0");
     CHECK(ui.waitFor([&] { return session->forces().empty(); }));
 }
+
+TEST_CASE("Text too long for its place is cut, never in the middle of a character") {
+    Ui ui(startStop(), ""); // an ImGui context, for the font
+    CHECK(view::fitText("short", 1000.0F) == "short");
+    const auto cut = view::fitText("elapsedTravelTime", 60.0F);
+    CHECK(cut.size() >= 3);
+    CHECK(cut.substr(cut.size() - 2) == "..");
+    CHECK(ImGui::CalcTextSize(cut.c_str()).x <= 60.0F);
+    const auto umlauts = view::fitText("öööööööööööö", 40.0F);
+    CHECK(umlauts.substr(umlauts.size() - 2) == "..");
+    CHECK((umlauts.size() - 2) % 2 == 0); // whole two-byte characters only
+}

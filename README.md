@@ -30,6 +30,7 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 7. Translate KOP blocks to ST for `soft_plc`, shown next to the ladder
 8. Run and online mode: start `soft_plc`, show power flow and live values in KOP and ST
 9. Watch table: chosen variables from any block, with live values, Set and Force
+10. Clearer online drawing: dashed wires without power, pin values that are never cut off
 
 ## Building
 
@@ -55,7 +56,7 @@ The window shows the blocks on the left (New block, Rename, Delete) and the open
 
 ## Online
 
-**Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (**Export ST**, then `soft_plc --monitor=5020 <project>.st`). Online, the rungs show power flow in green and box pins their values; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
+**Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (**Export ST**, then `soft_plc --monitor=5020 <project>.st`). Online, the rungs show power flow as in TIA Portal: solid green where power flows, dashed blue where it doesn't, closed contacts green and open ones blue. Box pins show their values under their operands, and hovering a box lists all its pins, uncut; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
 
 To change a value: double-click a contact or coil to flip its operand, or select it and use **Set TRUE/FALSE** (written once) or **Force TRUE/FALSE** (held every cycle, until **Unforce**). In the simulator, inputs keep what you set; a real soft_plc reads its inputs every cycle, so there inputs must be forced. When the project changes, **Download** restarts the simulator with it.
 

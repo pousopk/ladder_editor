@@ -13,3 +13,4 @@ What each milestone teaches, about PLC programming and about C++, with pointers 
 | 7. Translating KOP to ST | [07-kop-to-st.md](07-kop-to-st.md) |
 | 8. Online mode | [08-online-mode.md](08-online-mode.md) |
 | 9. The watch table | [09-watch-table.md](09-watch-table.md) |
+| 10. Clearer online drawing | [10-online-drawing.md](10-online-drawing.md) |

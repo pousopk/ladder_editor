@@ -2,6 +2,7 @@
 #include "ladder/boxes.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <string>
 
 namespace view {
@@ -17,11 +18,34 @@ const ImU32 kHover = IM_COL32(90, 140, 220, 60);
 const ImU32 kSelected = IM_COL32(90, 140, 220, 120);
 const ImU32 kSelectedBorder = IM_COL32(120, 170, 255, 255);
 const ImU32 kMissing = IM_COL32(240, 160, 70, 255);
-const ImU32 kPowered = IM_COL32(70, 210, 100, 255); // online: power flows here
-const ImU32 kValue = IM_COL32(120, 215, 135, 255);  // online: a value read from the PLC
+// Online, as in TIA Portal: power flows along solid green, not along dashed
+// blue. A contact is green when it's closed, blue when it's open.
+const ImU32 kPowered = IM_COL32(70, 210, 100, 255);
+const ImU32 kNoPower = IM_COL32(80, 130, 230, 255);
+const ImU32 kValue = IM_COL32(120, 215, 135, 255); // online: a value read from the PLC
 
-ImU32 wireColor(bool powered) {
-    return powered ? kPowered : kWire;
+enum class Flow { Offline, Powered, Unpowered };
+
+Flow flowOf(bool online, bool powered) {
+    return !online ? Flow::Offline : powered ? Flow::Powered : Flow::Unpowered;
+}
+
+// A straight wire: plain offline, green with power, dashed blue without.
+void wire(ImDrawList* draw, ImVec2 from, ImVec2 to, Flow flow, float thickness) {
+    if (flow != Flow::Unpowered) {
+        draw->AddLine(from, to, flow == Flow::Powered ? kPowered : kWire, thickness);
+        return;
+    }
+    const float dx = to.x - from.x;
+    const float dy = to.y - from.y;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    const float dash = thickness * 3.5F; // dashes and gaps scale with the zoom, like the thickness
+    const float gap = thickness * 2.5F;
+    for (float at = 0.0F; at < length; at += dash + gap) {
+        const float end = std::min(at + dash, length);
+        draw->AddLine({from.x + dx * at / length, from.y + dy * at / length},
+                      {from.x + dx * end / length, from.y + dy * end / length}, kNoPower, thickness);
+    }
 }
 
 // An operand as shown: "???" in orange while it's still empty.
@@ -62,8 +86,8 @@ void operandText(ImDrawList* draw, float centerX, float y, const std::string& op
 void stubs(ImDrawList* draw, float left, float right, float y, float halfSymbol, float thickness,
            const ItemPower* power) {
     const float center = (left + right) / 2.0F;
-    draw->AddLine({left, y}, {center - halfSymbol, y}, wireColor(power && power->in), thickness);
-    draw->AddLine({center + halfSymbol, y}, {right, y}, wireColor(power && power->out), thickness);
+    wire(draw, {left, y}, {center - halfSymbol, y}, flowOf(power != nullptr, power && power->in), thickness);
+    wire(draw, {center + halfSymbol, y}, {right, y}, flowOf(power != nullptr, power && power->out), thickness);
 }
 
 void drawContact(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Contact& contact,
@@ -76,8 +100,9 @@ void drawContact(ImDrawList* draw, const Grid& g, const PlacedItem& item, const 
     const float tall = g.scale(11.0F);
     const float thickness = g.scale(1.6F);
     stubs(draw, left, right, y, half, thickness, power);
-    // Online, a closed contact (one that would pass power) is green, with or without power.
-    const auto symbol = wireColor(power && power->conducting == true);
+    // Online, a closed contact (one that would pass power) is green, with or
+    // without power; an open one blue; one whose value isn't known yet plain.
+    const auto symbol = power == nullptr || !power->conducting ? kWire : *power->conducting ? kPowered : kNoPower;
     if (power && power->conducting == true) {
         draw->AddRectFilled({center - half, y - tall}, {center + half, y + tall}, IM_COL32(70, 210, 100, 60));
     }
@@ -99,7 +124,7 @@ void drawCoil(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Coi
     const float thickness = g.scale(1.6F);
     stubs(draw, left, right, y, radius, thickness, power);
     // ( ): two arcs of a circle, opening towards each other.
-    const auto symbol = wireColor(power && power->in);
+    const auto symbol = power == nullptr ? kWire : power->in ? kPowered : kNoPower;
     draw->PathArcTo({center, y}, radius, 2.4F, 3.9F, 12);
     draw->PathStroke(symbol, 0, thickness);
     draw->PathArcTo({center, y}, radius, -0.75F, 0.75F, 12);
@@ -135,8 +160,8 @@ void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box&
     const float thickness = g.scale(1.6F);
     const float boxTop = y - g.scale(14.0F);
     const float boxBottom = g.top(item.row + item.height) - g.scale(8.0F);
-    draw->AddLine({left, y}, {left + inset, y}, wireColor(power && power->in), thickness);
-    draw->AddLine({right - inset, y}, {right, y}, wireColor(power && power->out), thickness);
+    wire(draw, {left, y}, {left + inset, y}, flowOf(power != nullptr, power && power->in), thickness);
+    wire(draw, {right - inset, y}, {right, y}, flowOf(power != nullptr, power && power->out), thickness);
     draw->AddRect({left + inset, boxTop}, {right - inset, boxBottom}, kWire, g.scale(3.0F), 0, thickness);
 
     const float center = (left + right) / 2.0F;
@@ -156,11 +181,10 @@ void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box&
     draw->AddText({pinLeft, textY(0)}, kPinText, std::string(type->powerInput).c_str());
     const auto out = std::string(type->powerOutput);
     draw->AddText({pinRight - ImGui::CalcTextSize(out.c_str()).x, textY(0)}, kPinText, out.c_str());
-    // Inputs on the left half, outputs on the right half; each clipped to its
-    // half, so long operands can't run into each other.
-    const float middle = (pinLeft + pinRight) / 2.0F;
-    draw->PushClipRect({pinLeft, boxTop}, {middle - g.scale(2.0F), boxBottom}, true);
-    // Online: a pin's operand with its value, "PV preset = 100", in green.
+    // Inputs on the left half, outputs on the right half. An operand too
+    // long for its half is cut short (the tooltip shows it whole); online,
+    // its value goes on the line below, so it's never the part cut off.
+    const float half = (pinRight - pinLeft) / 2.0F - g.scale(2.0F);
     const auto valueOf = [&](const std::string& operand) -> std::optional<std::string> {
         if (online == nullptr || !online->value) {
             return std::nullopt;
@@ -169,20 +193,50 @@ void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box&
     };
     for (std::size_t i = 0; i < type->inputs.size(); ++i) {
         const auto operand = operandOf(box.inputs, type->inputs[i]);
-        const auto value = valueOf(operand);
-        const auto text = std::string(type->inputs[i]) + " " + operand + (value ? " = " + *value : "");
-        draw->AddText({pinLeft, textY(i + 1)}, value ? kValue : kPinText, text.c_str());
+        const auto text = fitText(type->inputs[i] + " " + operand, half);
+        draw->AddText({pinLeft, textY(i + 1)}, kPinText, text.c_str());
+        if (const auto value = valueOf(operand)) {
+            const auto shown = fitText("= " + *value, half);
+            draw->AddText({pinLeft, textY(i + 1) + line}, kValue, shown.c_str());
+        }
     }
-    draw->PopClipRect();
-    draw->PushClipRect({middle + g.scale(2.0F), boxTop}, {pinRight, boxBottom}, true);
     for (std::size_t i = 0; i < type->outputs.size(); ++i) {
         const auto operand = operandOf(box.outputs, type->outputs[i]);
-        const auto value = valueOf(operand);
-        const auto text = operand + (value ? " = " + *value : "") + " " + std::string(type->outputs[i]);
-        draw->AddText({pinRight - ImGui::CalcTextSize(text.c_str()).x, textY(i + 1)}, value ? kValue : kPinText,
-                      text.c_str());
+        const auto pin = " " + type->outputs[i];
+        const auto text = fitText(operand, half - ImGui::CalcTextSize(pin.c_str()).x) + pin;
+        draw->AddText({pinRight - ImGui::CalcTextSize(text.c_str()).x, textY(i + 1)}, kPinText, text.c_str());
+        if (const auto value = valueOf(operand)) {
+            const auto shown = fitText("= " + *value, half);
+            draw->AddText({pinRight - ImGui::CalcTextSize(shown.c_str()).x, textY(i + 1) + line}, kValue,
+                          shown.c_str());
+        }
     }
-    draw->PopClipRect();
+}
+
+// Everything about a box, uncut: its pins, their operands and, online, their values.
+void boxTooltip(const Box& box, const BoxCatalog& boxes, const RungOnline* online) {
+    ImGui::Text("%s %s", box.type.c_str(), box.instance.c_str());
+    const auto* type = boxes.find(box.type);
+    if (type == nullptr) {
+        return;
+    }
+    const auto row = [&](const std::string& pin, const std::string& operand, const char* arrow) {
+        std::optional<std::string> value;
+        if (online != nullptr && online->value) {
+            value = online->value(operand);
+        }
+        ImGui::Text("  %-4s %s %s", pin.c_str(), arrow, operand.c_str());
+        if (value) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(kValue), "= %s", value->c_str());
+        }
+    };
+    for (const auto& pin : type->inputs) {
+        row(pin, operandOf(box.inputs, pin), ":=");
+    }
+    for (const auto& pin : type->outputs) {
+        row(pin, operandOf(box.outputs, pin), "=>");
+    }
 }
 
 // Online: which points of the grid have power. A point is a column boundary
@@ -243,6 +297,21 @@ bool contains(const ImVec4& r, ImVec2 p) {
 
 } // namespace
 
+std::string fitText(std::string_view text, float width) {
+    if (ImGui::CalcTextSize(text.data(), text.data() + text.size()).x <= width) {
+        return std::string(text);
+    }
+    const float dots = ImGui::CalcTextSize("..").x;
+    std::size_t length = text.size();
+    while (length > 0 && ImGui::CalcTextSize(text.data(), text.data() + length).x + dots > width) {
+        --length;
+        while (length > 0 && (static_cast<unsigned char>(text[length]) & 0xC0) == 0x80) {
+            --length; // never cut a UTF-8 character in half
+        }
+    }
+    return std::string(text.substr(0, length)) + "..";
+}
+
 ImVec2 itemCenter(const PlacedItem& item, ImVec2 origin, float zoom) {
     const Grid g(origin, zoom);
     return {(g.x(item.column) + g.x(item.column + item.width)) / 2.0F, g.y(item.row)};
@@ -282,7 +351,7 @@ RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std:
     // The rails: the left one feeds power, the right one closes the circuit.
     const float railTop = g.top(0) + g.scale(6.0F);
     const float railBottom = g.top(layout.height) - g.scale(6.0F);
-    draw->AddLine({g.x(0), railTop}, {g.x(0), railBottom}, wireColor(online != nullptr),
+    draw->AddLine({g.x(0), railTop}, {g.x(0), railBottom}, online != nullptr ? kPowered : kWire,
                   g.scale(3.0F)); // online, it's live
     draw->AddLine({g.x(layout.width), railTop}, {g.x(layout.width), railBottom}, kWire, g.scale(3.0F));
 
@@ -291,15 +360,14 @@ RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std:
         powered.emplace(layout, online->power);
     }
     const auto at = [&](std::size_t column, std::size_t row) {
-        return wireColor(powered && powered->has(column, row));
+        return flowOf(online != nullptr, powered && powered->has(column, row));
     };
-    for (const auto& wire : layout.wires) {
-        draw->AddLine({g.x(wire.fromColumn), g.y(wire.row)}, {g.x(wire.toColumn), g.y(wire.row)},
-                      at(wire.fromColumn, wire.row), thickness);
+    for (const auto& w : layout.wires) {
+        wire(draw, {g.x(w.fromColumn), g.y(w.row)}, {g.x(w.toColumn), g.y(w.row)}, at(w.fromColumn, w.row), thickness);
     }
     for (const auto& link : layout.links) {
-        draw->AddLine({g.x(link.column), g.y(link.fromRow)}, {g.x(link.column), g.y(link.toRow)},
-                      at(link.column, link.fromRow), thickness);
+        wire(draw, {g.x(link.column), g.y(link.fromRow)}, {g.x(link.column), g.y(link.toRow)},
+             at(link.column, link.fromRow), thickness);
     }
     const auto powerOf = [&](const PlacedItem& item) { return online ? online->power.find(item.path) : nullptr; };
     for (const auto& item : layout.items) {
@@ -312,6 +380,14 @@ RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std:
             drawContact(draw, g, item, *contact, powerOf(item));
         } else if (const auto* box = std::get_if<Box>(element)) {
             drawBox(draw, g, item, *box, boxes, online);
+        }
+    }
+    // Hovering a box shows all of it, uncut (after the usual tooltip delay).
+    if (result.hovered && std::holds_alternative<ElementPath>(*result.hovered)) {
+        const auto* box = std::get_if<Box>(elementAt(rung, std::get<ElementPath>(*result.hovered)));
+        if (box != nullptr && ImGui::BeginItemTooltip()) { // the item: the rung's invisible button
+            boxTooltip(*box, boxes, online);
+            ImGui::EndTooltip();
         }
     }
     return result;

@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <optional>
 #include <string>
+#include <string_view>
 
 // Draws one rung with Dear ImGui, from its layout, and tells which element
 // the mouse is over. Only drawing: nothing here changes the rung.
@@ -31,6 +32,10 @@ struct RungOnline {
     ladder::RungPower power;
     std::function<std::optional<std::string>(const std::string& operand)> value;
 };
+
+// `text`, or as much of its start as fits in `width` pixels (at the current
+// font) followed by "..".
+std::string fitText(std::string_view text, float width);
 
 // The centre of a placed item in pixels, for a rung drawn at `origin`.
 ImVec2 itemCenter(const ladder::PlacedItem& item, ImVec2 origin, float zoom);

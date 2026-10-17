@@ -326,6 +326,10 @@ void KopEditor::drawNetworks() {
     if (networks.empty()) {
         ImGui::TextColored(kDim, "No networks yet: press Ctrl+N or click +Network to add one.");
     }
+    if (online()) {
+        ImGui::TextColored(kDim, "Online: power flows along green, not along dashed blue; a closed contact is green. "
+                                 "Hover a box for its pins and values.");
+    }
     if (context_->error && !context_->error->network) {
         ImGui::TextColored(kProblem, "soft_plc, in the interface: %s", context_->error->message.c_str());
     }
