@@ -9,3 +9,4 @@ What each milestone teaches, about PLC programming and about C++, with pointers 
 | 3. Structured editing | [03-structured-editing.md](03-structured-editing.md) |
 | 4. Undo and redo | [04-undo-redo.md](04-undo-redo.md) |
 | 5. Projects | [05-projects.md](05-projects.md) |
+| 6. The ST editor | [06-st-editor.md](06-st-editor.md) |

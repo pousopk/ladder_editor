@@ -5,7 +5,7 @@
 // The function blocks that can be placed in a rung as boxes, and how power
 // goes through each one. The standard blocks are built in; boxes for the
 // project's own function blocks come once the editor can read the
-// interfaces of ST blocks too (soft_plc's parser, milestone 6).
+// interfaces of ST blocks too, with the translation to ST (milestone 7).
 //
 //            ┌── TON ──┐
 //   power ──►│IN      Q│──► power

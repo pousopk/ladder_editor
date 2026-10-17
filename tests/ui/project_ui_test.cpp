@@ -94,7 +94,7 @@ TEST_CASE("Editing an ST block's text, and saving the whole project") {
     ui.clickWidget("block 1");
     ui.clickWidget("source");
     ui.key(ImGuiKey_End, ImGuiKey_LeftCtrl); // to the end of the text
-    ui.type("// mixer logic comes here\n");
+    ui.type("// mixer logic comes here");
     CHECK(ui.window().modified());
     ui.key(ImGuiKey_S, ImGuiKey_LeftCtrl); // saves even while typing in the text
     CHECK_FALSE(ui.window().modified());
@@ -115,4 +115,86 @@ TEST_CASE("Quitting with unsaved changes asks first") {
     CHECK_FALSE(ui.window().closeConfirmed());
     ui.clickWidget("quit without saving");
     CHECK(ui.window().closeConfirmed());
+}
+
+// ---------------------------------------------------------------- The ST code editor
+
+namespace {
+
+// A project with a KOP PROGRAM and one ST function block with this text.
+Project withSt(std::string source) {
+    auto project = twoBlocks();
+    project.blocks[1].source = std::move(source);
+    return project;
+}
+
+const ladder::Block& mixer(Ui& ui) {
+    return ui.window().project().blocks[1];
+}
+
+} // namespace
+
+TEST_CASE("Typing in the code editor: Enter keeps the indentation") {
+    Ui ui(withSt("FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nVAR_OUTPUT on : BOOL; END_VAR\n    on := run;\n"
+                 "END_FUNCTION_BLOCK"),
+          "");
+    ui.clickWidget("block 1");
+    ui.clickWidget("source");
+    ui.key(ImGuiKey_Home, ImGuiKey_LeftCtrl); // to the start of the text
+    for (int i = 0; i < 3; ++i) {
+        ui.key(ImGuiKey_DownArrow);
+    }
+    ui.key(ImGuiKey_End); // the end of "    on := run;"
+    ui.key(ImGuiKey_Enter);
+    ui.type("IF NOT run THEN on := FALSE; END_IF;");
+    CHECK(mixer(ui).source ==
+          "FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nVAR_OUTPUT on : BOOL; END_VAR\n    on := run;\n"
+          "    IF NOT run THEN on := FALSE; END_IF;\nEND_FUNCTION_BLOCK");
+    CHECK_FALSE(ui.window().stDiagnostic().has_value());
+}
+
+TEST_CASE("An error shows up while typing, with soft_plc's message, and goes away with undo") {
+    Ui ui(withSt("FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nEND_FUNCTION_BLOCK"), "");
+    ui.clickWidget("block 1");
+    ui.clickWidget("source");
+    ui.key(ImGuiKey_Home, ImGuiKey_LeftCtrl);
+    ui.key(ImGuiKey_DownArrow);
+    ui.key(ImGuiKey_End);
+    ui.key(ImGuiKey_Enter);
+    ui.type("run := 5;");
+    const auto& diagnostic = ui.window().stDiagnostic();
+    REQUIRE(diagnostic.has_value());
+    CHECK(diagnostic->block == 1);
+    CHECK(diagnostic->line == 2);
+    CHECK(diagnostic->column == 7);
+    CHECK(diagnostic->message == "can't assign integer literal to 'run', which is BOOL");
+
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl); // the typing, as one step
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl); // the new line
+    CHECK(mixer(ui).source == "FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nEND_FUNCTION_BLOCK");
+    CHECK_FALSE(ui.window().stDiagnostic().has_value());
+}
+
+TEST_CASE("Select all, copy and paste in the code editor") {
+    Ui ui(withSt("FUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK"), "");
+    ui.clickWidget("block 1");
+    ui.clickWidget("source");
+    ui.key(ImGuiKey_A, ImGuiKey_LeftCtrl);
+    ui.key(ImGuiKey_C, ImGuiKey_LeftCtrl);
+    ui.key(ImGuiKey_End, ImGuiKey_LeftCtrl);
+    ui.key(ImGuiKey_Enter);
+    ui.key(ImGuiKey_V, ImGuiKey_LeftCtrl);
+    CHECK(mixer(ui).source == "FUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK\nFUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK");
+    // Two function blocks in one block: the editor says so.
+    REQUIRE(ui.window().stDiagnostic().has_value());
+    CHECK(ui.window().stDiagnostic()->message ==
+          "a block holds just its own FUNCTION_BLOCK: put this FUNCTION_BLOCK in a block of its own");
+}
+
+TEST_CASE("Clicking the ST problem opens its block") {
+    Ui ui(withSt("FUNCTION_BLOCK Blender\nEND_FUNCTION_BLOCK"), ""); // the block is called Mixer
+    REQUIRE(ui.window().stDiagnostic().has_value());
+    CHECK(ui.window().currentBlock() == 0);
+    ui.clickWidget("st problem");
+    CHECK(ui.window().currentBlock() == 1);
 }

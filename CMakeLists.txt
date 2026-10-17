@@ -36,7 +36,7 @@ function(ladder_editor_mark_system target)
   set_target_properties(${target} PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${dirs}")
 endfunction()
 # --- nlohmann/json: reading and writing project files ---
-FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(json)
 
 ladder_editor_mark_system(fmt)
@@ -67,12 +67,25 @@ add_library(ladder_core STATIC
   src/ladder/history.cpp
   src/ladder/block.cpp
   src/ladder/project_file.cpp
+  src/text/text_document.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
 target_link_libraries(ladder_core
   PUBLIC  ladder_editor_options tl::expected
   PRIVATE fmt::fmt nlohmann_json::nlohmann_json
 )
+
+# --- soft_plc: its own lexer, parser and analyzer check the ST blocks ---
+set(LADDER_EDITOR_SOFT_PLC_DIR "${CMAKE_SOURCE_DIR}/../soft_plc" CACHE PATH "Where soft_plc's sources are")
+add_subdirectory(${LADDER_EDITOR_SOFT_PLC_DIR} soft_plc EXCLUDE_FROM_ALL)
+
+# Colours and live errors for ST, from soft_plc.
+add_library(ladder_st STATIC
+  src/st_support/highlight.cpp
+  src/st_support/diagnostics.cpp
+)
+target_include_directories(ladder_st PUBLIC src)
+target_link_libraries(ladder_st PUBLIC ladder_core PRIVATE soft_plc_language fmt::fmt)
 
 # --- Dear ImGui, without a window: enough for the editor's UI and its tests ---
 # Dear ImGui has no CMake support upstream: built as plain static libraries.
@@ -94,9 +107,10 @@ add_library(ladder_ui STATIC
   src/app/kop_editor.cpp
   src/app/project_window.cpp
   src/view/rung_view.cpp
+  src/view/code_editor.cpp
 )
 target_include_directories(ladder_ui PUBLIC src)
-target_link_libraries(ladder_ui PUBLIC ladder_core imgui_core PRIVATE fmt::fmt)
+target_link_libraries(ladder_ui PUBLIC ladder_core ladder_st imgui_core PRIVATE fmt::fmt)
 
 # --- The editor application (optional: needs GLFW and OpenGL) ---
 option(LADDER_EDITOR_BUILD_APP "Build the ladder_editor application (needs GLFW and OpenGL)" ON)

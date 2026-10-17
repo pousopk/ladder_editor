@@ -6,7 +6,7 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 
 - **Two languages, per block:** each block (PROGRAM, FUNCTION_BLOCK, FUNCTION) is written either in KOP or in ST, and blocks call each other across languages, as in TIA Portal.
 - **Execution:** no runtime of its own. KOP blocks are translated into ST, which `soft_plc` compiles and runs together with the ST blocks. The generated ST is shown read-only next to the ladder. Live values come back from `soft_plc` to animate power flow.
-- **ST editing:** the ST editor uses `soft_plc`'s own lexer, parser and analyzer for syntax colours and for errors while typing, so the messages are exactly the ones `soft_plc` gives.
+- **ST editing:** the ST editor uses `soft_plc`'s own lexer, parser and analyzer for syntax colours and for errors while typing, so the messages are exactly the ones `soft_plc` gives. The editor widget itself is written here (ImGui's text box has no colours).
 - **Look:** generic IEC ladder, kept clean and simple.
 - **KOP editing:** structured editing (insert elements into rung positions, add branches), so rungs are always valid.
 - **Timing:** this project starts once `soft_plc` is mature (it did, after `soft_plc` milestone 9).
@@ -32,6 +32,8 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 
 ## Building
 
+`ladder_editor` uses `soft_plc` as a library, from `../soft_plc` next to it (or set `-DLADDER_EDITOR_SOFT_PLC_DIR=...`).
+
 ```bash
 cmake -S . -B build          # Debug by default, with AddressSanitizer + UBSan
 cmake --build build -j
@@ -46,7 +48,11 @@ ctest --test-dir build --output-on-failure
 
 A project is a folder: `project.json` lists the blocks, and each block has its own file. KOP blocks are `Name.kop.json` (the interface, and each network in the one-line notation); ST blocks are plain `Name.st` files.
 
-The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks; an ST block is a text editor for now. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours; as you type, soft_plc compiles the project's ST blocks, and its first error is underlined in place, with its message. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+
+## Editing ST
+
+Arrows, Home/End (Home goes to the first non-space, then column 0), Ctrl+arrows by word, PageUp/PageDown, Shift to select, double-click for a word, Ctrl+A/C/X/V, Tab and Shift+Tab (also on selected lines), Enter keeps the indentation, Ctrl+Z/Ctrl+Y. Hover the red underline to read the error.
 
 ## Editing KOP
 
@@ -77,7 +83,9 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `src/ladder/edit.hpp` | The structured edit operations |
 | `src/ladder/history.hpp` | Undo and redo: commands and the history |
 | `src/ladder/block.hpp`, `project_file.hpp` | Blocks, projects and their rules; project folders on disk |
-| `src/view/` | Drawing a rung with Dear ImGui (`rung_view.hpp`) |
+| `src/text/` | The code editor's text: lines, cursor, selection, editing, undo |
+| `src/st_support/` | ST colours and live errors, from `soft_plc`'s lexer and compiler |
+| `src/view/` | Drawing a rung (`rung_view.hpp`) and the code editor widget (`code_editor.hpp`), with Dear ImGui |
 | `src/app/` | The application: `main.cpp`, the project window and the KOP editor |
 | `examples/` | Example projects |
 | `tests/` | doctest unit tests, mirroring `src/`; `tests/ui/` drives the editor's UI headless, with simulated mouse and keys |

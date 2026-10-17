@@ -2,6 +2,8 @@
 #include "app/kop_editor.hpp"
 #include "app/widget_positions.hpp"
 #include "ladder/block.hpp"
+#include "st_support/diagnostics.hpp"
+#include "view/code_editor.hpp"
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -13,7 +15,7 @@ namespace app {
 // "Program blocks" folder in TIA Portal), the open block on the right, and
 // the project's problems under the block list. KOP blocks open in a
 // KopEditor (one per block, each with its own undo history); ST blocks in a
-// text editor (milestone 6 makes it a real code editor).
+// code editor with colours and live errors from soft_plc's compiler.
 class ProjectWindow {
 public:
     // `folder` is where the project is saved; empty when it isn't saved
@@ -35,6 +37,9 @@ public:
     void askToClose() { askClose_ = true; }
     bool closeConfirmed() const { return closeConfirmed_; }
 
+    // The first problem soft_plc's compiler finds in the ST blocks, if any.
+    const std::optional<st_support::StDiagnostic>& stDiagnostic() const { return stDiagnostic_; }
+
 private:
     void drawHeader();
     void drawBlockList();
@@ -44,6 +49,8 @@ private:
     void drawRenamePopup();
     void drawDeletePopup();
     void drawClosePopup();
+    void drawStBlock(std::size_t index);
+    void checkSt();
 
     bool save();
     void addBlock(ladder::Block block);
@@ -53,9 +60,13 @@ private:
 
     ladder::Project project_;
     std::filesystem::path folder_;
-    std::vector<std::unique_ptr<KopEditor>> editors_; // one per block; null for ST blocks
-    std::vector<std::string> savedSources_;           // ST blocks: their text as saved
-    bool structureModified_ = false;                  // blocks added, deleted or renamed since saving
+    std::vector<std::unique_ptr<KopEditor>> editors_;            // one per block; null for ST blocks
+    std::vector<std::unique_ptr<view::CodeEditor>> codeEditors_; // one per block; null for KOP blocks
+    std::vector<std::size_t> coloredVersion_;                    // the text version each code editor's colours are for
+    std::optional<st_support::StDiagnostic> stDiagnostic_;
+    bool stChanged_ = true;                 // an ST block changed: check them again
+    std::vector<std::string> savedSources_; // ST blocks: their text as saved
+    bool structureModified_ = false;        // blocks added, deleted or renamed since saving
     std::size_t current_ = 0;
     std::string status_;
     WidgetPositions widgets_;
