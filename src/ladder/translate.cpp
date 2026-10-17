@@ -283,11 +283,7 @@ private:
         const auto key = upper(text);
         auto it = addresses_.find(key);
         if (it == addresses_.end()) {
-            std::string generated = kGeneratedPrefix;
-            for (const char c : key.substr(1)) {
-                generated += std::isalnum(static_cast<unsigned char>(c)) != 0 ? c : '_';
-            }
-            it = addresses_.emplace(key, generated).first;
+            it = addresses_.emplace(key, addressVariable(key)).first;
         }
         return it->second;
     }
@@ -400,6 +396,14 @@ std::size_t lineCount(const std::string& text) {
 }
 
 } // namespace
+
+std::string addressVariable(std::string_view address) {
+    std::string generated = kGeneratedPrefix;
+    for (const char c : upper(address.substr(address.empty() ? 0 : 1))) {
+        generated += std::isalnum(static_cast<unsigned char>(c)) != 0 ? c : '_';
+    }
+    return generated;
+}
 
 std::optional<std::size_t> TranslatedBlock::networkAt(std::size_t line) const {
     auto it = std::upper_bound(origins.begin(), origins.end(), line,

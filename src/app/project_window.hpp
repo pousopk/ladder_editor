@@ -2,9 +2,12 @@
 #include "app/kop_editor.hpp"
 #include "app/widget_positions.hpp"
 #include "ladder/block.hpp"
+#include "online/session.hpp"
+#include "online/simulator.hpp"
 #include "st_support/diagnostics.hpp"
 #include "view/code_editor.hpp"
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,7 +17,11 @@ namespace app {
 // The editor's main window: the project's blocks on the left (like the
 // "Program blocks" folder in TIA Portal), the open block on the right, and
 // the project's problems under the block list. The whole project is
-// translated to ST and compiled by soft_plc whenever it changes. KOP blocks open in a
+// translated to ST and compiled by soft_plc whenever it changes.
+//
+// Online mode runs the project in a simulator inside the editor, or
+// connects to a soft_plc started with --monitor, and shows the open block's
+// live values: power flow on the rungs, values next to ST lines. KOP blocks open in a
 // KopEditor (one per block, each with its own undo history); ST blocks in a
 // code editor with colours and live errors from soft_plc's compiler.
 class ProjectWindow {
@@ -29,6 +36,9 @@ public:
     const ladder::Project& project() const { return project_; }
     std::size_t currentBlock() const { return current_; }
     KopEditor* kopEditor(std::size_t block) { return block < editors_.size() ? editors_[block].get() : nullptr; }
+    const view::CodeEditor* codeEditor(std::size_t block) const {
+        return block < codeEditors_.size() ? codeEditors_[block].get() : nullptr;
+    }
 
     // Where some widgets were last drawn: "new block", "block 1", "source",
     // "create", ... For the UI tests.
@@ -40,6 +50,16 @@ public:
 
     // The first problem soft_plc's compiler finds in the project, if any.
     const std::optional<st_support::StDiagnostic>& codeError() const { return check_.error; }
+    // Online mode, as the header's buttons do it. False (and a status
+    // message) if it can't: the project has errors, nothing listens on the port.
+    bool simulate();
+    bool connect(std::uint16_t port);
+    void goOffline();
+    online::Session* session() { return session_.get(); }
+    // Online: the instance the open block is watched from ("" for the
+    // PROGRAM), or nothing if it isn't watched.
+    const std::optional<std::string>& instance() const { return instance_; }
+
     // The project as ST, as it was last checked.
     const ladder::TranslatedProject& translation() const { return check_.translation; }
 
@@ -54,6 +74,11 @@ private:
     void drawClosePopup();
     void drawStBlock(std::size_t index);
     void checkCode();
+    void drawOnline();
+    void updateWatch(const std::vector<std::string>& paths);
+    // Online: the instance a FUNCTION_BLOCK is shown from, chosen in a combo.
+    // Nothing when the block can't be watched (a FUNCTION, an unused FB).
+    std::optional<std::string> chooseInstance(const ladder::Block& block);
     void exportSt();
 
     bool save();
@@ -72,6 +97,15 @@ private:
     std::vector<std::string> savedSources_;  // ST blocks: their text as saved
     bool structureModified_ = false;         // blocks added, deleted or renamed since saving
     std::size_t current_ = 0;
+    // Online mode.
+    std::unique_ptr<online::Simulator> simulator_; // the PLC inside the editor, when simulating
+    std::unique_ptr<online::Session> session_;     // the connection to the PLC; null when offline
+    std::optional<ladder::Project> downloaded_;    // the project as the simulator runs it
+    std::vector<std::string> watching_;            // what the session reads
+    std::map<std::string, std::string> instances_; // per FUNCTION_BLOCK: the instance shown
+    std::optional<std::string> instance_;
+    int port_ = 5020;
+
     std::string status_; // the last action's error
     std::string note_;   // the last action's result, when it worked
     WidgetPositions widgets_;

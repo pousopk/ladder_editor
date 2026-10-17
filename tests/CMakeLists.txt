@@ -13,6 +13,7 @@ add_executable(ladder_tests
   ladder/history_test.cpp
   ladder/project_test.cpp
   ladder/translate_test.cpp
+  ladder/power_test.cpp
   text/text_document_test.cpp
 )
 target_link_libraries(ladder_tests PRIVATE ladder_core doctest::doctest fmt::fmt)
@@ -29,11 +30,20 @@ target_link_libraries(ladder_st_tests PRIVATE ladder_st soft_plc_language doctes
 target_compile_definitions(ladder_st_tests PRIVATE LADDER_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME ladder_st_tests COMMAND ladder_st_tests)
 
+# Online mode: the simulator and the session, talking over TCP on 127.0.0.1.
+add_executable(ladder_online_tests
+  test_main.cpp
+  online/online_test.cpp
+)
+target_link_libraries(ladder_online_tests PRIVATE ladder_online ladder_st doctest::doctest)
+add_test(NAME ladder_online_tests COMMAND ladder_online_tests)
+
 # The editor's UI, driven headless: no window, simulated mouse and keyboard.
 add_executable(ladder_ui_tests
   test_main.cpp
   ui/editor_ui_test.cpp
   ui/project_ui_test.cpp
+  ui/online_ui_test.cpp
 )
 target_link_libraries(ladder_ui_tests PRIVATE ladder_ui doctest::doctest fmt::fmt)
 target_compile_definitions(ladder_ui_tests PRIVATE LADDER_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

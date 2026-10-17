@@ -1,9 +1,12 @@
 #pragma once
 #include "ladder/boxes.hpp"
 #include "ladder/layout.hpp"
+#include "ladder/power.hpp"
 #include "ladder/rung.hpp"
+#include <functional>
 #include <imgui.h>
 #include <optional>
+#include <string>
 
 // Draws one rung with Dear ImGui, from its layout, and tells which element
 // the mouse is over. Only drawing: nothing here changes the rung.
@@ -23,6 +26,12 @@ struct RungView {
     bool overRung = false;                   // the mouse is somewhere over the rung
 };
 
+// Online mode: where power flows (green), and the values of the box pins' operands.
+struct RungOnline {
+    ladder::RungPower power;
+    std::function<std::optional<std::string>(const std::string& operand)> value;
+};
+
 // The centre of a placed item in pixels, for a rung drawn at `origin`.
 ImVec2 itemCenter(const ladder::PlacedItem& item, ImVec2 origin, float zoom);
 
@@ -31,6 +40,6 @@ ImVec2 itemCenter(const ladder::PlacedItem& item, ImVec2 origin, float zoom);
 // `boxes` are the box types the layout was made with.
 RungView drawRung(const ladder::Rung& rung, const ladder::RungLayout& layout, int id,
                   const std::optional<ladder::ItemPath>& selected, float zoom,
-                  const ladder::BoxCatalog& boxes = ladder::standardBoxes());
+                  const ladder::BoxCatalog& boxes = ladder::standardBoxes(), const RungOnline* online = nullptr);
 
 } // namespace view

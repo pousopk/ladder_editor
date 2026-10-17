@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Translates KOP blocks into Structured Text that soft_plc compiles, by
@@ -70,5 +71,8 @@ TranslatedProject translateProject(const Project& project, const BoxCatalog& box
 
 // The names the translation keeps for itself.
 constexpr const char* kGeneratedPrefix = "_kop_";
+
+// The variable generated for an address used as an operand: %QX0.0 is _kop_QX0_0.
+std::string addressVariable(std::string_view address);
 
 } // namespace ladder

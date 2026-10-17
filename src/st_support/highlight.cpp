@@ -166,3 +166,36 @@ std::vector<Span> highlight(std::string_view source) {
 }
 
 } // namespace st_support
+
+namespace st_support {
+
+std::vector<std::vector<std::string>> namesByLine(std::string_view source) {
+    using softplc::st::TokenKind;
+    const auto tokens = softplc::st::tokenize(source);
+    if (!tokens) {
+        return {};
+    }
+    std::vector<std::vector<std::string>> lines;
+    const auto& t = *tokens;
+    for (std::size_t i = 0; i < t.size(); ++i) {
+        if (t[i].kind != TokenKind::Identifier) {
+            continue;
+        }
+        const auto line = t[i].location.line - 1;
+        std::string name = t[i].text;
+        while (i + 2 < t.size() && t[i + 1].kind == TokenKind::Dot && t[i + 2].kind == TokenKind::Identifier) {
+            name += "." + t[i + 2].text;
+            i += 2;
+        }
+        if (lines.size() <= line) {
+            lines.resize(line + 1);
+        }
+        auto& names = lines[line];
+        if (std::find(names.begin(), names.end(), name) == names.end()) {
+            names.push_back(std::move(name));
+        }
+    }
+    return lines;
+}
+
+} // namespace st_support

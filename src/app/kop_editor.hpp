@@ -6,6 +6,7 @@
 #include "ladder/layout.hpp"
 #include "ladder/rung.hpp"
 #include "ladder/translate.hpp"
+#include "online/session.hpp"
 #include "st_support/diagnostics.hpp"
 #include "view/code_editor.hpp"
 #include <imgui.h>
@@ -23,6 +24,8 @@ struct KopContext {
     const ladder::BoxCatalog* boxes = &ladder::standardBoxes(); // the box types, the project's own included
     const ladder::TranslatedBlock* translation = nullptr;       // the block as ST, if it's been translated
     std::optional<st_support::StDiagnostic> error;              // soft_plc's error, if it's in this block
+    online::Session* session = nullptr;                         // online: the running PLC; null when offline
+    std::string instance; // online, a FUNCTION_BLOCK: the instance shown ("p1"); empty in the PROGRAM
 };
 
 // The editor for one KOP block: its interface (a table of variables, like
@@ -56,6 +59,8 @@ public:
     const std::optional<Selection>& selection() const { return selection_; }
     float zoom() const { return zoom_; }
     bool showingSt() const { return showSt_; }
+    // Online: the PLC variables the last frame showed, to be read for the next one.
+    const std::vector<std::string>& watched() const { return watched_; }
     const view::CodeEditor& stView() const { return stView_; }
 
     // Where network `index` was drawn in the last frame (its top-left corner
@@ -83,6 +88,14 @@ private:
     void drawDetails();
     void drawSt();
     void drawProblems(std::size_t network);
+    void drawOnlineDetails(const std::string& operand);
+
+    // Online: the path of an operand in the PLC (and remember to watch it),
+    // its BOOL value, and a value written to it.
+    std::optional<std::string> watch(const std::string& operand);
+    std::optional<bool> onlineBool(const std::string& operand);
+    void modify(const std::string& operand, const char* command, bool value);
+    bool online() const { return context_ != nullptr && context_->session != nullptr; }
     void drawEditPopup();
     void drawBoxPopup();
     void handleShortcuts();
@@ -127,10 +140,11 @@ private:
     std::size_t boxChoice_ = 0;                 // the highlighted entry in the box palette
     std::string status_;                        // the result of the last action, when it failed
     float zoom_ = 1.0F;
-    bool showSt_ = false;         // the ST panel is shown
-    view::CodeEditor stView_;     // the ST panel: read-only
-    std::string stShown_;         // the text the ST panel shows
-    std::vector<ImVec2> origins_; // where each network was drawn, last frame
+    bool showSt_ = false;              // the ST panel is shown
+    view::CodeEditor stView_;          // the ST panel: read-only
+    std::string stShown_;              // the text the ST panel shows
+    std::vector<std::string> watched_; // online: what this frame showed
+    std::vector<ImVec2> origins_;      // where each network was drawn, last frame
     WidgetPositions widgets_;
 };
 

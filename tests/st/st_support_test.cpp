@@ -220,3 +220,26 @@ TEST_CASE("Errors in KOP blocks are traced back to their network") {
     CHECK(check.error->line == 3);
     CHECK_FALSE(check.error->network.has_value());
 }
+
+TEST_CASE("Online helpers: the names on each line, and the instances of each function block") {
+    const auto names = namesByLine("PROGRAM Main\n  x := t1.Q AND x;\n\n  p1.timer(IN := a);\nEND_PROGRAM");
+    REQUIRE(names.size() == 4);
+    CHECK(names[0] == std::vector<std::string>{"Main"});
+    CHECK(names[1] == std::vector<std::string>{"x", "t1.Q"});
+    CHECK(names[2].empty());
+    CHECK(names[3] == std::vector<std::string>{"p1.timer", "IN", "a"});
+
+    ladder::Project project;
+    project.blocks.push_back(
+        st("Main", BlockKind::Program,
+           "PROGRAM Main\nVAR p1 : Pump; p2 : Pump; line : Line; t : TON; END_VAR\nEND_PROGRAM\n"));
+    project.blocks.push_back(
+        st("Line", BlockKind::FunctionBlock, "FUNCTION_BLOCK Line\nVAR p : Pump; END_VAR\nEND_FUNCTION_BLOCK\n"));
+    project.blocks.push_back(st("Pump", BlockKind::FunctionBlock,
+                                "FUNCTION_BLOCK Pump\nVAR_INPUT run : BOOL; END_VAR\nEND_FUNCTION_BLOCK\n"));
+    const auto check = checkCode(project);
+    REQUIRE_FALSE(check.error.has_value());
+    CHECK(check.instances.at("PUMP") == std::vector<std::string>{"p1", "p2", "line.p"});
+    CHECK(check.instances.at("LINE") == std::vector<std::string>{"line"});
+    CHECK(check.instances.count("TON") == 0);
+}

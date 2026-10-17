@@ -13,6 +13,8 @@ const ImU32 kLineNumber = IM_COL32(110, 115, 125, 255);
 const ImU32 kErrorRed = IM_COL32(240, 90, 80, 255);
 const ImU32 kSelection = IM_COL32(70, 110, 170, 140);
 const ImU32 kCursor = IM_COL32(235, 235, 240, 255);
+const ImU32 kNote = IM_COL32(110, 200, 120, 255); // online values at the end of a line
+const ImU32 kNoteBack = IM_COL32(40, 70, 45, 160);
 const ImU32 kCurrentLine = IM_COL32(255, 255, 255, 12);
 
 // One character typed (a Unicode code point) as UTF-8.
@@ -265,6 +267,14 @@ bool CodeEditor::draw(const char* id, ImVec2 size) {
             piece(span.column, done, span.color);
         }
         piece(done, text.size(), kText);
+        // Online: the values of the line's variables, after its end.
+        if (line < notes_.size() && !notes_[line].empty()) {
+            const auto& note = notes_[line];
+            const float x = textX + columnX(line, text.size()) + charW * 3.0F;
+            const auto noteSize = ImGui::CalcTextSize(note.c_str());
+            draw->AddRectFilled({x - charW / 2.0F, y}, {x + noteSize.x + charW / 2.0F, y + lineH}, kNoteBack, 3.0F);
+            draw->AddText({x, y}, kNote, note.c_str());
+        }
     }
 
     // The error: a wavy red line under the word it points at, its message on hover.

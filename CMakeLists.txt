@@ -68,6 +68,7 @@ add_library(ladder_core STATIC
   src/ladder/block.cpp
   src/ladder/project_file.cpp
   src/ladder/translate.cpp
+  src/ladder/power.cpp
   src/text/text_document.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
@@ -88,6 +89,15 @@ add_library(ladder_st STATIC
 target_include_directories(ladder_st PUBLIC src)
 target_link_libraries(ladder_st PUBLIC ladder_core PRIVATE soft_plc_language fmt::fmt)
 
+# Online mode: a soft_plc inside the editor, and the connection to a running soft_plc.
+add_library(ladder_online STATIC
+  src/online/simulator.cpp
+  src/online/session.cpp
+  src/online/paths.cpp
+)
+target_include_directories(ladder_online PUBLIC src)
+target_link_libraries(ladder_online PUBLIC ladder_core PRIVATE soft_plc_core)
+
 # --- Dear ImGui, without a window: enough for the editor's UI and its tests ---
 # Dear ImGui has no CMake support upstream: built as plain static libraries.
 FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.92.6)
@@ -107,12 +117,13 @@ ladder_editor_mark_system(imgui_core)
 add_library(ladder_ui STATIC
   src/app/kop_editor.cpp
   src/app/project_window.cpp
-  src/app/st_colors.cpp
+  src/app/example.cpp
+  src/app/st_display.cpp
   src/view/rung_view.cpp
   src/view/code_editor.cpp
 )
 target_include_directories(ladder_ui PUBLIC src)
-target_link_libraries(ladder_ui PUBLIC ladder_core ladder_st imgui_core PRIVATE fmt::fmt)
+target_link_libraries(ladder_ui PUBLIC ladder_core ladder_st ladder_online imgui_core PRIVATE fmt::fmt)
 
 # --- The editor application (optional: needs GLFW and OpenGL) ---
 option(LADDER_EDITOR_BUILD_APP "Build the ladder_editor application (needs GLFW and OpenGL)" ON)

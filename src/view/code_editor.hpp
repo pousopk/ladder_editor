@@ -37,6 +37,9 @@ public:
 
     void setColors(std::vector<ColoredSpan> spans) { spans_ = std::move(spans); }
     void setError(std::optional<ErrorMark> error) { error_ = std::move(error); }
+    // A note at the end of each line (index = line), such as online values; empty for none.
+    void setNotes(std::vector<std::string> notes) { notes_ = std::move(notes); }
+    const std::vector<std::string>& notes() const { return notes_; }
     // Read-only: the text can be selected and copied, not changed.
     void setReadOnly(bool readOnly) { readOnly_ = readOnly; }
 
@@ -54,6 +57,7 @@ private:
     text::TextDocument document_;
     std::vector<ColoredSpan> spans_;
     std::optional<ErrorMark> error_;
+    std::vector<std::string> notes_;
     bool readOnly_ = false;
     bool selectingWithMouse_ = false;
     bool cursorMoved_ = false; // scroll it into view after drawing

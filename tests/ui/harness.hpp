@@ -4,9 +4,12 @@
 #include "ladder/layout.hpp"
 #include "ladder/notation.hpp"
 #include "view/rung_view.hpp"
+#include <chrono>
 #include <doctest/doctest.h>
+#include <functional>
 #include <imgui.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Drives the editor's UI like a user would: mouse moves, clicks and keys,
@@ -42,6 +45,20 @@ public:
         ImGui::NewFrame();
         window_.draw();
         ImGui::Render(); // makes the draw data; nothing shows it, which is fine
+    }
+
+    // Draws frames until `condition` holds (online mode: the PLC runs on its
+    // own time). False after 3 seconds.
+    bool waitFor(const std::function<bool()>& condition) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < deadline) {
+            frame();
+            if (condition()) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
     }
 
     // Clicks the centre of an element or coil of network `rung`.

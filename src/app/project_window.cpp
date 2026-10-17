@@ -1,5 +1,5 @@
 #include "app/project_window.hpp"
-#include "app/st_colors.hpp"
+#include "app/st_display.hpp"
 #include "ladder/project_file.hpp"
 #include <algorithm>
 #include <cctype>
@@ -18,6 +18,8 @@ const ImVec4 kProblem{0.95F, 0.45F, 0.40F, 1.0F};
 const ImVec4 kDim{0.6F, 0.6F, 0.65F, 1.0F};
 const ImVec4 kKop{0.45F, 0.70F, 0.95F, 1.0F};
 const ImVec4 kSt{0.85F, 0.70F, 0.40F, 1.0F};
+const ImVec4 kOnline{0.45F, 0.85F, 0.50F, 1.0F};
+const ImVec4 kStop{0.95F, 0.70F, 0.30F, 1.0F};
 
 constexpr float kListWidth = 250.0F;
 
@@ -75,6 +77,7 @@ void ProjectWindow::draw() {
         checkCode(); // something changed since the last check
     }
     drawHeader();
+    drawOnline();
     ImGui::Separator();
 
     ImGui::BeginChild("blocks", ImVec2(kListWidth, 0), ImGuiChildFlags_Borders);
@@ -212,8 +215,14 @@ void ProjectWindow::drawCurrentBlock() {
     // moves (the blocks' vector may), so its address is a stable ID.
     ImGui::PushID(editors_[current_] ? static_cast<const void*>(editors_[current_].get())
                                      : static_cast<const void*>(codeEditors_[current_].get()));
+    instance_ = session_ ? chooseInstance(block) : std::nullopt;
+    const auto& instance = instance_;
     if (auto* editor = editors_[current_].get()) {
         app::KopContext context;
+        if (instance) {
+            context.session = session_.get();
+            context.instance = *instance;
+        }
         context.boxes = &check_.boxes;
         const auto& parts = check_.translation.parts;
         if (current_ < parts.size() && parts[current_].block == current_) {
@@ -223,6 +232,7 @@ void ProjectWindow::drawCurrentBlock() {
             context.error = check_.error;
         }
         editor->draw(block, context);
+        updateWatch(instance ? editor->watched() : std::vector<std::string>{});
     } else {
         drawStBlock(current_);
     }
@@ -240,6 +250,11 @@ void ProjectWindow::drawStBlock(std::size_t index) {
     editor.setError(
         errorIn(index) ? std::optional(view::ErrorMark{check_.error->line, check_.error->column, check_.error->message})
                        : std::nullopt);
+
+    std::vector<std::string> watched;
+    editor.setNotes(session_ && instance_ ? onlineNotes(editor.document().text(), *session_, *instance_, watched)
+                                          : std::vector<std::string>{});
+    updateWatch(watched);
 
     const float messageHeight = ImGui::GetTextLineHeightWithSpacing() + 4.0F;
     if (editor.draw("##source", ImVec2(-1.0F, -messageHeight))) {
@@ -275,6 +290,152 @@ void ProjectWindow::exportSt() {
     status_.clear();
     note_ = fmt::format("Exported {}{}", path.filename().string(),
                         check_.error ? ", but soft_plc reports an error in it" : "");
+}
+
+// ---------------------------------------------------------------- Online
+
+void ProjectWindow::drawOnline() {
+    if (!session_) {
+        if (ImGui::Button("Simulate")) {
+            simulate();
+        }
+        ImGui::SetItemTooltip("Run the project in a soft_plc inside the editor, and go online");
+        widgets_.remember("simulate");
+        ImGui::SameLine();
+        if (ImGui::Button("Connect")) {
+            connect(static_cast<std::uint16_t>(port_));
+        }
+        ImGui::SetItemTooltip("Go online with a soft_plc already running this project:\n"
+                              "export it, then run  soft_plc --monitor=%d <project>.st",
+                              port_);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(110.0F);
+        if (ImGui::InputInt("port", &port_, 0)) {
+            port_ = std::clamp(port_, 1, 65535);
+        }
+        return;
+    }
+    const auto status = session_->status();
+    const ImVec4 color = !status.connected ? kProblem : status.running ? kOnline : kStop;
+    ImGui::TextColored(color, "%s",
+                       !status.connected ? "OFFLINE: connection lost"
+                       : status.running  ? "ONLINE  RUN"
+                                         : "ONLINE  STOP");
+    ImGui::SameLine();
+    ImGui::TextColored(kDim, "%s", simulator_ ? "simulator" : fmt::format("soft_plc on port {}", port_).c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Go offline")) {
+        goOffline();
+        return;
+    }
+    widgets_.remember("go offline");
+    if (simulator_ && downloaded_ && *downloaded_ != project_) {
+        ImGui::SameLine();
+        ImGui::TextColored(kStop, "The PLC runs an older version.");
+        ImGui::SameLine();
+        if (ImGui::Button("Download")) {
+            simulate();
+            return;
+        }
+        ImGui::SetItemTooltip("Restart the simulator with the project as it is now (its values start over)");
+        widgets_.remember("download");
+    }
+    ImGui::SameLine();
+    ImGui::TextColored(kDim, "%s", status.details.c_str());
+    if (!status.lastError.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(kProblem, "%s", status.lastError.c_str());
+    }
+}
+
+bool ProjectWindow::simulate() {
+    if (!checked_ || *checked_ != project_) {
+        checkCode();
+    }
+    if (check_.error) {
+        status_ = "soft_plc can't compile the project yet: fix the errors first.";
+        return false;
+    }
+    goOffline();
+    auto started = online::Simulator::start(check_.translation.text);
+    if (!started) {
+        status_ = started.error();
+        return false;
+    }
+    auto connected = online::Session::connect((*started)->port());
+    if (!connected) {
+        status_ = connected.error();
+        return false;
+    }
+    simulator_ = std::move(*started);
+    session_ = std::move(*connected);
+    downloaded_ = project_;
+    status_.clear();
+    return true;
+}
+
+bool ProjectWindow::connect(std::uint16_t port) {
+    goOffline();
+    auto connected = online::Session::connect(port);
+    if (!connected) {
+        status_ = fmt::format("No soft_plc on port {}: {}", port, connected.error());
+        return false;
+    }
+    session_ = std::move(*connected);
+    port_ = port;
+    status_.clear();
+    return true;
+}
+
+void ProjectWindow::goOffline() {
+    session_.reset();
+    simulator_.reset();
+    downloaded_.reset();
+    watching_.clear();
+}
+
+void ProjectWindow::updateWatch(const std::vector<std::string>& paths) {
+    if (session_ && paths != watching_) {
+        session_->watch(paths);
+        watching_ = paths;
+    }
+}
+
+std::optional<std::string> ProjectWindow::chooseInstance(const Block& block) {
+    switch (block.kind) {
+    case BlockKind::Program:
+        return std::string();
+    case BlockKind::Types:
+        return std::nullopt;
+    case BlockKind::Function:
+        ImGui::TextColored(kDim, "Online: a FUNCTION keeps nothing between calls, so there are no values to watch.");
+        return std::nullopt;
+    case BlockKind::FunctionBlock:
+        break;
+    }
+    const auto found = check_.instances.find(upper(block.name));
+    if (found == check_.instances.end() || found->second.empty()) {
+        ImGui::TextColored(kDim, "Online: the PROGRAM has no instance of %s, so there are no values to watch.",
+                           block.name.c_str());
+        return std::nullopt;
+    }
+    const auto& paths = found->second;
+    auto& chosen = instances_[upper(block.name)];
+    if (std::find(paths.begin(), paths.end(), chosen) == paths.end()) {
+        chosen = paths.front();
+    }
+    ImGui::SetNextItemWidth(200.0F);
+    if (ImGui::BeginCombo("Instance", chosen.c_str())) {
+        for (const auto& path : paths) {
+            if (ImGui::Selectable(path.c_str(), path == chosen)) {
+                chosen = path;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("The instance whose values are shown: each instance has its own memory");
+    widgets_.remember("instance");
+    return chosen;
 }
 
 // ---------------------------------------------------------------- Popups

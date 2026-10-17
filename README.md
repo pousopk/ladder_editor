@@ -42,6 +42,8 @@ ctest --test-dir build --output-on-failure
 ./build/ladder_editor                         # the built-in example (not saved)
 ./build/ladder_editor examples/conveyor       # a project folder: a KOP program and an ST function block
 ./build/ladder_editor myproject               # a folder without a project: start a new one
+./build/ladder_editor --simulate examples/conveyor     # and go online at once, in the simulator
+./build/ladder_editor --connect=5020 examples/conveyor # or with a soft_plc running with --monitor=5020
 ```
 
 ## Projects
@@ -49,6 +51,12 @@ ctest --test-dir build --output-on-failure
 A project is a folder: `project.json` lists the blocks, and each block has its own file. KOP blocks are `Name.kop.json` (the interface, and each network in the one-line notation); ST blocks are plain `Name.st` files.
 
 The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours. Whenever anything changes, the KOP blocks are translated to ST and soft_plc compiles the whole project; its first error is underlined in place in an ST block, or shown under its network in a KOP block. Tick **ST** in a KOP block's toolbar to see its translation next to the networks; **Export ST** writes the whole project as `<project>.st` for soft_plc. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+
+## Online
+
+**Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (**Export ST**, then `soft_plc --monitor=5020 <project>.st`). Online, the rungs show power flow in green and box pins their values; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
+
+To change a value: double-click a contact or coil to flip its operand, or select it and use **Set TRUE/FALSE** (written once) or **Force TRUE/FALSE** (held every cycle, until **Unforce**). In the simulator, inputs keep what you set; a real soft_plc reads its inputs every cycle, so there inputs must be forced. When the project changes, **Download** restarts the simulator with it.
 
 ## Editing ST
 
@@ -85,6 +93,8 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `src/ladder/block.hpp`, `project_file.hpp` | Blocks, projects and their rules; project folders on disk |
 | `src/ladder/translate.hpp` | KOP blocks translated to ST, with each line traced back to its network |
 | `src/text/` | The code editor's text: lines, cursor, selection, editing, undo |
+| `src/ladder/power.hpp` | Where power flows in a rung, from the PLC's values |
+| `src/online/` | Online mode: the simulator, the session that reads and writes the PLC's values, operand paths |
 | `src/st_support/` | ST colours, the project's box types, and the whole project checked by `soft_plc`'s compiler |
 | `src/view/` | Drawing a rung (`rung_view.hpp`) and the code editor widget (`code_editor.hpp`), with Dear ImGui |
 | `src/app/` | The application: `main.cpp`, the project window and the KOP editor |

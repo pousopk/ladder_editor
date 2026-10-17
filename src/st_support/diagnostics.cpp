@@ -67,6 +67,20 @@ std::optional<StDiagnostic> checkHeader(const ladder::Block& block, std::size_t 
     return std::nullopt;
 }
 
+// Every instance of the project's function blocks inside `pou`, by path.
+void collectInstances(const softplc::st::Pou& pou, const std::string& prefix,
+                      std::map<std::string, std::vector<std::string>>& instances) {
+    for (const auto& variable : pou.variables) {
+        const auto* block = variable.functionBlock;
+        if (block == nullptr || block->builtin) {
+            continue;
+        }
+        const auto path = prefix + variable.name;
+        instances[softplc::toUpper(block->name)].push_back(path);
+        collectInstances(*block, path + ".", instances);
+    }
+}
+
 // The box type of an ST function block, from its text.
 std::optional<ladder::BoxType> stBox(const ladder::Block& block) {
     const auto pous = softplc::st::parseFunctionBlocks(block.source);
@@ -112,7 +126,7 @@ ladder::BoxCatalog projectBoxes(const ladder::Project& project) {
 }
 
 CodeCheck checkCode(const ladder::Project& project) {
-    CodeCheck result{projectBoxes(project), {}, std::nullopt};
+    CodeCheck result{projectBoxes(project), {}, std::nullopt, {}};
     for (std::size_t i = 0; i < project.blocks.size(); ++i) {
         const auto& block = project.blocks[i];
         if (block.language != ladder::Language::St) {
@@ -132,6 +146,7 @@ CodeCheck checkCode(const ladder::Project& project) {
 
     const auto compiled = softplc::st::compileProgram(source);
     if (compiled) {
+        collectInstances(compiled->program, "", result.instances);
         return result;
     }
     // Back from a line of the whole text to the block (and network) it came from.

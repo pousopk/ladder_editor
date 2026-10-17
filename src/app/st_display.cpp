@@ -1,5 +1,7 @@
-#include "app/st_colors.hpp"
+#include "app/st_display.hpp"
+#include "online/paths.hpp"
 #include "st_support/highlight.hpp"
+#include <algorithm>
 
 namespace app {
 
@@ -38,6 +40,27 @@ std::vector<view::ColoredSpan> stColors(std::string_view source) {
         colors.push_back(view::ColoredSpan{span.line, span.column, span.length, colorOf(span.style)});
     }
     return colors;
+}
+
+std::vector<std::string> onlineNotes(std::string_view source, const online::Session& session,
+                                     const std::string& instance, std::vector<std::string>& watched) {
+    const auto lines = st_support::namesByLine(source);
+    std::vector<std::string> notes(lines.size());
+    for (std::size_t line = 0; line < lines.size(); ++line) {
+        for (const auto& name : lines[line]) {
+            const auto path = online::monitorPath(name, instance);
+            if (!path) {
+                continue;
+            }
+            if (std::find(watched.begin(), watched.end(), *path) == watched.end()) {
+                watched.push_back(*path);
+            }
+            if (const auto value = session.value(*path)) {
+                notes[line] += (notes[line].empty() ? "" : "   ") + name + " = " + *value;
+            }
+        }
+    }
+    return notes;
 }
 
 } // namespace app

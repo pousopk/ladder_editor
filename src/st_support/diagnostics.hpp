@@ -3,8 +3,10 @@
 #include "ladder/boxes.hpp"
 #include "ladder/translate.hpp"
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Live errors for the whole project, from soft_plc's own compiler.
 //
@@ -35,6 +37,9 @@ struct CodeCheck {
     // The first problem: either an ST block whose text doesn't declare
     // what the project says it is, or the first error soft_plc finds.
     std::optional<StDiagnostic> error;
+    // When it compiles: the instances of each function block, by path from
+    // the PROGRAM ("p1", "line2.p1"), keyed by the block's name in upper case.
+    std::map<std::string, std::vector<std::string>> instances;
 };
 
 CodeCheck checkCode(const ladder::Project& project);

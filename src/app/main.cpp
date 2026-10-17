@@ -3,56 +3,41 @@
 //   ladder_editor                       the built-in example (can't be saved)
 //   ladder_editor examples/conveyor     open a project folder; Ctrl+S saves it
 //   ladder_editor myproject             a folder without a project yet: start a new one
+//   ladder_editor --simulate ...        and go online at once, in the simulator
+//   ladder_editor --connect=5020 ...    and go online with the soft_plc monitoring on that port
+#include "app/example.hpp"
 #include "app/project_window.hpp"
 #include "ladder/block.hpp"
 #include "ladder/project_file.hpp"
-#include "ladder/rung_file.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <string>
-
-namespace {
-
-constexpr const char* kExampleNetworks =
-    R"(// Motor starter: start holds itself, stop (wired normally closed) always wins
-(start | motor) stop => motor
-
-// The lamp comes on 2 s after the motor starts
-motor {TON lampDelay, PT := T#2s, ET => elapsed} => lamp
-
-// Count boxes on the conveyor, reset by the operator
-{R_TRIG boxEdge} {CTU boxes, R := resetCount, PV := 10, CV => count} => batchDone
-)";
-
-ladder::Project exampleProject() {
-    using namespace ladder;
-    Project project;
-    project.name = "example";
-    auto main = newBlock("Main", BlockKind::Program, Language::Kop);
-    main.networks = parseRungFile(kExampleNetworks).value();
-    main.variables = {
-        Variable{"start", "BOOL", Section::Local, "", "%IX0.0", "start button"},
-        Variable{"stop", "BOOL", Section::Local, "", "%IX0.1", "stop button, wired normally closed"},
-        Variable{"motor", "BOOL", Section::Local, "", "%QX0.0", ""},
-        Variable{"lamp", "BOOL", Section::Local, "", "%QX0.1", ""},
-        Variable{"lampDelay", "TON", Section::Local, "", "", ""},
-        Variable{"elapsed", "TIME", Section::Local, "", "", ""},
-    };
-    project.blocks.push_back(std::move(main));
-    project.blocks.push_back(newBlock("Mixer", BlockKind::FunctionBlock, Language::St));
-    return project;
-}
-
-} // namespace
+#include <string_view>
 
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     fs::path folder; // empty: the built-in example
     ladder::Project project;
+    bool simulate = false;
+    int connectPort = 0;
+    while (argc > 1 && std::string_view(argv[1]).rfind("--", 0) == 0) {
+        const std::string_view option = argv[1];
+        if (option == "--simulate") {
+            simulate = true;
+        } else if (option.rfind("--connect=", 0) == 0) {
+            connectPort = std::atoi(argv[1] + 10);
+        } else {
+            argc = 0; // unknown: show the usage
+            break;
+        }
+        --argc;
+        ++argv;
+    }
     if (argc == 2) {
         folder = argv[1];
         if (fs::exists(folder / "project.json")) {
@@ -69,9 +54,9 @@ int main(int argc, char** argv) {
             project.blocks.push_back(ladder::newBlock("Main", ladder::BlockKind::Program, ladder::Language::Kop));
         }
     } else if (argc == 1) {
-        project = exampleProject();
+        project = app::exampleProject();
     } else {
-        std::fprintf(stderr, "usage: ladder_editor [project folder]\n");
+        std::fprintf(stderr, "usage: ladder_editor [--simulate | --connect=PORT] [project folder]\n");
         return 2;
     }
 
@@ -98,6 +83,12 @@ int main(int argc, char** argv) {
 
     {
         app::ProjectWindow editor(std::move(project), folder);
+        // Going online at start; if it can't, the window says why.
+        if (simulate) {
+            editor.simulate();
+        } else if (connectPort > 0 && connectPort < 65536) {
+            editor.connect(static_cast<std::uint16_t>(connectPort));
+        }
         for (;;) {
             // Closing the window with unsaved changes asks first.
             if (glfwWindowShouldClose(window)) {

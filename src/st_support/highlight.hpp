@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,5 +36,15 @@ struct Span {
 // that isn't closed yet) doesn't stop the colours before it: an unclosed
 // comment colours everything after it as a comment, as it will be once closed.
 std::vector<Span> highlight(std::string_view source);
+
+} // namespace st_support
+
+namespace st_support {
+
+// The names on each line that may be variables: `count`, `t1.Q`,
+// `p1.timer.ET` (names joined by dots). For online mode, which shows their
+// values at the end of the line; the PLC says which ones really are
+// variables. Lines count from 0. Nothing if the text can't be read.
+std::vector<std::vector<std::string>> namesByLine(std::string_view source);
 
 } // namespace st_support

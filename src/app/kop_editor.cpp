@@ -1,8 +1,10 @@
 #include "app/kop_editor.hpp"
-#include "app/st_colors.hpp"
+#include "app/st_display.hpp"
 #include "ladder/boxes.hpp"
 #include "ladder/check.hpp"
 #include "ladder/notation.hpp"
+#include "ladder/power.hpp"
+#include "online/paths.hpp"
 #include "view/rung_view.hpp"
 #include <algorithm>
 #include <cctype>
@@ -19,6 +21,7 @@ using namespace ladder;
 const ImVec4 kComment{0.55F, 0.75F, 0.55F, 1.0F};
 const ImVec4 kProblem{0.95F, 0.45F, 0.40F, 1.0F};
 const ImVec4 kDim{0.6F, 0.6F, 0.65F, 1.0F};
+const ImVec4 kOnline{0.45F, 0.85F, 0.50F, 1.0F};
 
 constexpr const char* kEditPopup = "Edit element";
 
@@ -93,6 +96,7 @@ template <class Path> ItemResult toItem(const tl::expected<std::optional<Path>, 
 void KopEditor::draw(Block& block, const KopContext& context) {
     block_ = &block;
     context_ = &context;
+    watched_.clear();
     widgets_.clear();
     // A popup closed by a click elsewhere is already closed when the frame
     // starts: record its edit before that click does anything else.
@@ -354,12 +358,38 @@ void KopEditor::drawNetworks() {
         const std::optional<ItemPath> selected = networkSelected ? selection_->item : std::nullopt;
         const auto layout = layOut(rung, boxes()); // cheap: recomputed every frame, so it's never stale
         origins_[i] = ImGui::GetCursorScreenPos();
-        const auto shown = view::drawRung(rung, layout, static_cast<int>(i), selected, zoom_, boxes());
+        std::optional<view::RungOnline> live;
+        if (online()) {
+            live.emplace();
+            live->power =
+                evaluatePower(rung, [this](const std::string& operand) { return onlineBool(operand); }, boxes());
+            live->value = [this](const std::string& operand) -> std::optional<std::string> {
+                const auto path = watch(operand);
+                return path ? context_->session->value(*path) : std::nullopt;
+            };
+        }
+        const auto shown =
+            view::drawRung(rung, layout, static_cast<int>(i), selected, zoom_, boxes(), live ? &*live : nullptr);
         if (shown.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             select(i, *shown.hovered);
         }
         if (shown.hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            select(i, *shown.hovered, true);
+            // Online, a double-click on a contact or coil flips its operand
+            // in the PLC (as "Modify" does in TIA Portal); offline, it edits.
+            std::optional<std::string> operand;
+            if (const auto* coil = std::get_if<CoilPath>(&*shown.hovered)) {
+                operand = rung.coils[coil->index].operand;
+            } else if (const auto* contact =
+                           std::get_if<Contact>(elementAt(rung, std::get<ElementPath>(*shown.hovered)))) {
+                operand = contact->operand;
+            }
+            if (online() && operand) {
+                if (const auto value = onlineBool(*operand)) {
+                    modify(*operand, "WRITE", !*value);
+                }
+            } else {
+                select(i, *shown.hovered, true);
+            }
         }
         if (shown.overRung && !shown.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             select(i, std::nullopt); // a click between the elements selects the network
@@ -418,6 +448,8 @@ void KopEditor::drawSt() {
     }
     const auto& error = context_->error;
     stView_.setError(error ? std::optional(view::ErrorMark{error->line, error->column, error->message}) : std::nullopt);
+    stView_.setNotes(online() ? onlineNotes(text, *context_->session, context_->instance, watched_)
+                              : std::vector<std::string>{});
     const float messageHeight = ImGui::GetTextLineHeightWithSpacing() + 4.0F;
     stView_.draw("##st", ImVec2(-1.0F, -messageHeight));
     widgets_.remember("st view");
@@ -465,8 +497,75 @@ void KopEditor::drawDetails() {
     if (const auto* coilPath = std::get_if<CoilPath>(&*selection_->item)) {
         const auto& coil = rung.coils[coilPath->index];
         ImGui::Text("Coil %s", coil.operand.empty() ? "(no operand)" : coil.operand.c_str());
+        drawOnlineDetails(coil.operand);
     } else if (const auto* element = elementAt(rung, std::get<ElementPath>(*selection_->item))) {
         ImGui::Text("Selected: %s", formatElement(*element).c_str());
+        if (const auto* contact = std::get_if<Contact>(element)) {
+            drawOnlineDetails(contact->operand);
+        }
+    }
+}
+
+// Online: the selected operand's value, and buttons to change it in the PLC.
+void KopEditor::drawOnlineDetails(const std::string& operand) {
+    if (!online()) {
+        return;
+    }
+    const auto path = watch(operand);
+    if (!path) {
+        return;
+    }
+    const auto value = context_->session->value(*path);
+    const auto forces = context_->session->forces();
+    const bool forced = std::any_of(forces.begin(), forces.end(),
+                                    [&](const auto& force) { return lower(force.first) == lower(*path); });
+    ImGui::SameLine();
+    ImGui::TextColored(kOnline, "  = %s%s", value ? value->c_str() : "?", forced ? "  (forced)" : "");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Set TRUE"))
+        modify(operand, "WRITE", true);
+    widgets_.remember("set true");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Set FALSE"))
+        modify(operand, "WRITE", false);
+    widgets_.remember("set false");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Force TRUE"))
+        modify(operand, "FORCE", true);
+    widgets_.remember("force true");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Force FALSE"))
+        modify(operand, "FORCE", false);
+    widgets_.remember("force false");
+    if (forced) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Unforce"))
+            context_->session->send("UNFORCE " + *path);
+        widgets_.remember("unforce");
+    }
+    ImGui::TextColored(kDim, "Online: double-click a contact or coil to flip its operand. Set writes once (the "
+                             "program may change it again); Force holds it every cycle.");
+}
+
+std::optional<std::string> KopEditor::watch(const std::string& operand) {
+    auto path = online::monitorPath(operand, context_->instance);
+    if (path && std::find(watched_.begin(), watched_.end(), *path) == watched_.end()) {
+        watched_.push_back(*path);
+    }
+    return path;
+}
+
+std::optional<bool> KopEditor::onlineBool(const std::string& operand) {
+    if (const auto literal = online::boolLiteral(operand)) {
+        return literal;
+    }
+    const auto path = watch(operand);
+    return path ? context_->session->boolean(*path) : std::nullopt;
+}
+
+void KopEditor::modify(const std::string& operand, const char* command, bool value) {
+    if (const auto path = watch(operand)) {
+        context_->session->send(fmt::format("{} {} {}", command, *path, value ? "TRUE" : "FALSE"));
     }
 }
 
