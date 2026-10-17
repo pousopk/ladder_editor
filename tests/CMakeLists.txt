@@ -7,6 +7,8 @@ add_executable(ladder_tests
   ladder/rung_test.cpp
   ladder/notation_test.cpp
   ladder/check_test.cpp
+  ladder/layout_test.cpp
+  ladder/rung_file_test.cpp
 )
 target_link_libraries(ladder_tests PRIVATE ladder_core doctest::doctest fmt::fmt)
 add_test(NAME ladder_tests COMMAND ladder_tests)

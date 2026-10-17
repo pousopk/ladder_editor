@@ -5,3 +5,4 @@ What each milestone teaches, about PLC programming and about C++, with pointers 
 | Milestone | Lesson |
 |---|---|
 | 1. The data model for rungs | [01-rung-model.md](01-rung-model.md) |
+| 2. Drawing rungs | [02-drawing-rungs.md](02-drawing-rungs.md) |

@@ -56,12 +56,48 @@ add_library(ladder_core STATIC
   src/ladder/boxes.cpp
   src/ladder/check.cpp
   src/ladder/notation.cpp
+  src/ladder/layout.cpp
+  src/ladder/rung_file.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
 target_link_libraries(ladder_core
   PUBLIC  ladder_editor_options tl::expected
   PRIVATE fmt::fmt
 )
+
+# --- The editor application (optional: needs GLFW and OpenGL) ---
+option(LADDER_EDITOR_BUILD_APP "Build the ladder_editor application (needs GLFW and OpenGL)" ON)
+if(LADDER_EDITOR_BUILD_APP)
+  find_package(glfw3 QUIET)
+  find_package(OpenGL QUIET)
+endif()
+if(LADDER_EDITOR_BUILD_APP AND glfw3_FOUND AND OpenGL_FOUND)
+  # Dear ImGui has no CMake support upstream: built as a plain static library.
+  FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.92.6)
+  FetchContent_MakeAvailable(imgui)
+  add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
+  )
+  target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imgui_SOURCE_DIR}/misc/cpp)
+  target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+  ladder_editor_mark_system(imgui)
+
+  add_executable(ladder_editor
+    src/app/main.cpp
+    src/app/editor_window.cpp
+    src/view/rung_view.cpp
+  )
+  target_include_directories(ladder_editor PRIVATE src)
+  target_link_libraries(ladder_editor PRIVATE ladder_core imgui fmt::fmt)
+elseif(LADDER_EDITOR_BUILD_APP)
+  message(STATUS "ladder_editor application not built: GLFW or OpenGL development files not found")
+endif()
 
 enable_testing()
 add_subdirectory(tests)

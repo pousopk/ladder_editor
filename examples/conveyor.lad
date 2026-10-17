@@ -1,0 +1,22 @@
+// Conveyor with a start/stop station and a jam detector.
+// Run it with:  ./build/ladder_editor examples/conveyor.lad
+// Operands are soft_plc names; the translation to ST (milestone 7) will declare them.
+
+// Start/stop: start holds itself, stop and the emergency stop (both wired normally closed) always win
+(start | running) stop eStop => running
+
+// The belt motor follows "running", unless the jam detector tripped
+running /jammed => %QX0.0
+
+// A box should reach the end sensor within 8 s of passing the start sensor
+boxAtStart /boxAtEnd {TON travel, PT := T#8s, ET => travelTime} => S:jammed
+
+// The operator clears the jam with the reset button, once the end sensor is free again
+resetButton /boxAtEnd => R:jammed
+
+// Count boxes: one per rising edge of the end sensor
+{R_TRIG arrived} {CTU boxCount, R := resetButton, PV := 100, CV => boxes} => batchFull
+
+// The warning lamp blinks while jammed: two timers, each starting the other
+jammed /blinkOff.Q {TON blinkOn, PT := T#500ms} => warningLamp
+jammed blinkOn.Q {TON blinkOff, PT := T#500ms} => blinkPhase

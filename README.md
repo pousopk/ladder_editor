@@ -36,12 +36,20 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 cmake -S . -B build          # Debug by default, with AddressSanitizer + UBSan
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+
+./build/ladder_editor                         # the built-in example
+./build/ladder_editor examples/conveyor.lad   # a rung file: one rung per line, // comments above
 ```
+
+The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-dev`); without them, the library and the tests still build.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `src/ladder/` | The model: rungs and elements (`rung.hpp`), the standard boxes (`boxes.hpp`), the checks (`check.hpp`) and the text notation (`notation.hpp`) |
+| `src/ladder/` | The model: rungs and elements (`rung.hpp`), the standard boxes (`boxes.hpp`), the checks (`check.hpp`), the text notation (`notation.hpp`), rung files (`rung_file.hpp`) and the layout on a grid (`layout.hpp`) |
+| `src/view/` | Drawing a rung with Dear ImGui (`rung_view.hpp`) |
+| `src/app/` | The application: `main.cpp` and the editor window |
+| `examples/` | Example rung files |
 | `tests/` | doctest unit tests, mirroring `src/` |
 | `docs/lessons/` | What each milestone teaches, with review questions |
