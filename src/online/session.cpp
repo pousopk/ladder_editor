@@ -97,6 +97,20 @@ void Session::send(std::string command) {
     wake_.notify_all(); // don't wait for the next round
 }
 
+std::optional<Session::Variable> Session::describe(std::string_view path) const {
+    std::lock_guard lock(mutex_);
+    if (!variables_) {
+        return std::nullopt;
+    }
+    const auto it = variables_->find(upper(path));
+    return it == variables_->end() ? std::nullopt : std::optional(it->second);
+}
+
+bool Session::variablesKnown() const {
+    std::lock_guard lock(mutex_);
+    return variables_.has_value();
+}
+
 PlcStatus Session::status() const {
     std::lock_guard lock(mutex_);
     return status_;
@@ -136,6 +150,24 @@ bool Session::exchange() {
         status_.lastError = "connection lost: " + why;
         return false;
     };
+
+    // The program's variables don't change while it runs: listed once.
+    if (!listed_) {
+        auto reply = client.request("LIST");
+        if (!reply) {
+            return lost(reply.error());
+        }
+        std::map<std::string, Variable> variables;
+        for (const auto& word : words(*reply)) { // OK count:INT lamp:BOOL t1.ET:TIME ...
+            if (const auto colon = word.rfind(':'); colon != std::string::npos) {
+                const auto path = word.substr(0, colon);
+                variables[upper(path)] = Variable{path, word.substr(colon + 1)};
+            }
+        }
+        listed_ = true;
+        std::lock_guard lock(mutex_);
+        variables_ = std::move(variables);
+    }
 
     std::optional<std::string> refused;
     for (const auto& command : commands) {

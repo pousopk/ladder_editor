@@ -184,6 +184,10 @@ tl::expected<Project, std::string> loadProject(const std::filesystem::path& fold
             }
             project.blocks.push_back(std::move(block));
         }
+        for (const auto& entry : data.value("watch", json::array())) {
+            project.watch.push_back(WatchEntry{required(entry, "path", "project.json, watch table"),
+                                               text(entry, "modify", ""), text(entry, "comment", "")});
+        }
         return project;
     } catch (const LoadError& error) {
         return tl::unexpected(error.message);
@@ -212,6 +216,19 @@ tl::expected<void, std::string> saveProject(const Project& project, const std::f
                                       {"file", file}});
             writeAtomically(folder / file,
                             block.language == Language::Kop ? kopBlockJson(block).dump(2) + "\n" : block.source);
+        }
+        if (!project.watch.empty()) { // no key at all for an empty table
+            data["watch"] = json::array();
+            for (const auto& entry : project.watch) {
+                json line = {{"path", entry.path}};
+                if (!entry.modify.empty()) {
+                    line["modify"] = entry.modify;
+                }
+                if (!entry.comment.empty()) {
+                    line["comment"] = entry.comment;
+                }
+                data["watch"].push_back(std::move(line));
+            }
         }
         writeAtomically(folder / "project.json", data.dump(2) + "\n");
 

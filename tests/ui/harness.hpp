@@ -139,6 +139,9 @@ public:
     // Clicks a widget the window (or the open KOP editor) remembered by name.
     void clickWidget(std::string_view name) {
         auto center = window_.widgets().center(name);
+        if (!center && window_.showingWatchTable()) {
+            center = window_.watchTable().widgets().center(name);
+        }
         if (!center && window_.kopEditor(window_.currentBlock()) != nullptr) {
             center = window_.kopEditor(window_.currentBlock())->widgets().center(name);
         }

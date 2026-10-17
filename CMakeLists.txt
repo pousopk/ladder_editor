@@ -118,6 +118,7 @@ add_library(ladder_ui STATIC
   src/app/kop_editor.cpp
   src/app/project_window.cpp
   src/app/example.cpp
+  src/app/watch_table.cpp
   src/app/st_display.cpp
   src/view/rung_view.cpp
   src/view/code_editor.cpp

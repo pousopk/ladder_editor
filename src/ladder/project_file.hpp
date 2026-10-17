@@ -13,7 +13,9 @@
 //
 // project.json:
 //   { "format": 1, "name": "conveyor",
-//     "blocks": [ { "name": "Main", "kind": "PROGRAM", "language": "KOP", "file": "Main.kop.json" }, ... ] }
+//     "blocks": [ { "name": "Main", "kind": "PROGRAM", "language": "KOP", "file": "Main.kop.json" }, ... ],
+//     "watch":  [ { "path": "start", "modify": "TRUE", "comment": "press start" }, ... ] }
+// ("watch", the watch table, only when it has lines).
 //
 // A KOP block file keeps each network as its one-line notation (notation.hpp),
 // so the files stay readable and diff well in git:

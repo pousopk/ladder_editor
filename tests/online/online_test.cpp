@@ -127,3 +127,14 @@ TEST_CASE("Monitor paths of operands") {
     CHECK(online::boolLiteral("True") == true);
     CHECK_FALSE(online::boolLiteral("x").has_value());
 }
+
+TEST_CASE("The session knows the PLC's variables and their types") {
+    Online online(kProgram);
+    REQUIRE(eventually([&] { return online.session->variablesKnown(); }));
+    const auto count = online.session->describe("COUNT");
+    REQUIRE(count.has_value());
+    CHECK(count->path == "count"); // as declared
+    CHECK(count->type == "INT");
+    CHECK(online.session->describe("t1.ET")->type == "TIME");
+    CHECK_FALSE(online.session->describe("nothing").has_value());
+}

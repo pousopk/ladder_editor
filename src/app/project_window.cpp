@@ -45,6 +45,7 @@ ProjectWindow::ProjectWindow(Project project, std::filesystem::path folder)
         coloredVersion_.push_back(static_cast<std::size_t>(-1)); // not coloured yet
         savedSources_.push_back(block.source);
     }
+    savedWatch_ = project_.watch;
 }
 
 bool ProjectWindow::blockModified(std::size_t index) const {
@@ -55,7 +56,7 @@ bool ProjectWindow::blockModified(std::size_t index) const {
 }
 
 bool ProjectWindow::modified() const {
-    if (structureModified_) {
+    if (structureModified_ || project_.watch != savedWatch_) {
         return true;
     }
     for (std::size_t i = 0; i < project_.blocks.size(); ++i) {
@@ -136,9 +137,10 @@ void ProjectWindow::drawBlockList() {
         const auto& block = project_.blocks[i];
         ImGui::PushID(static_cast<int>(i));
         const auto start = ImGui::GetCursorPos();
-        if (ImGui::Selectable("##block", current_ == i, ImGuiSelectableFlags_AllowOverlap,
+        if (ImGui::Selectable("##block", current_ == i && !showWatch_, ImGuiSelectableFlags_AllowOverlap,
                               ImVec2(0, ImGui::GetTextLineHeight()))) {
             current_ = i;
+            showWatch_ = false;
         }
         widgets_.remember(fmt::format("block {}", i));
         ImGui::SetCursorPos(start);
@@ -149,6 +151,13 @@ void ProjectWindow::drawBlockList() {
         ImGui::TextColored(kDim, "%s", kindName(block.kind));
         ImGui::PopID();
     }
+    // The watch table, under the blocks (as in TIA Portal's project tree).
+    const auto watchLabel =
+        fmt::format("Watch table ({}){}###watch", project_.watch.size(), project_.watch != savedWatch_ ? " *" : "");
+    if (ImGui::Selectable(watchLabel.c_str(), showWatch_)) {
+        showWatch_ = true;
+    }
+    widgets_.remember("watch table");
     ImGui::Spacing();
     if (ImGui::SmallButton("New block")) {
         openNewBlock_ = true;
@@ -202,6 +211,12 @@ void ProjectWindow::drawProblems() {
 }
 
 void ProjectWindow::drawCurrentBlock() {
+    if (showWatch_) {
+        ImGui::TextUnformatted("Watch table");
+        watchTable_.draw(project_.watch, session_.get());
+        updateWatch(watchTable_.watched());
+        return;
+    }
     if (project_.blocks.empty()) {
         ImGui::TextColored(kDim, "No blocks yet: click \"New block\".");
         return;
@@ -591,6 +606,7 @@ bool ProjectWindow::save() {
         }
         savedSources_[i] = project_.blocks[i].source;
     }
+    savedWatch_ = project_.watch;
     structureModified_ = false;
     status_.clear();
     return true;

@@ -58,6 +58,16 @@ public:
     // A command for soft_plc: "WRITE start TRUE", "FORCE stop FALSE", "UNFORCE stop".
     void send(std::string command);
 
+    // A variable of the PLC: its path as declared and its type (BOOL, INT,
+    // TIME, ...). Nothing if the PLC has no such variable, or until the
+    // variables are known (they're listed once, when the session starts).
+    struct Variable {
+        std::string path;
+        std::string type;
+    };
+    std::optional<Variable> describe(std::string_view path) const;
+    bool variablesKnown() const;
+
     PlcStatus status() const;
     // The forced variables and their values, as soft_plc reports them.
     std::map<std::string, std::string> forces() const;
@@ -70,6 +80,7 @@ private:
 
     std::unique_ptr<Connection> connection_;
     std::chrono::milliseconds period_;
+    bool listed_ = false; // only the session thread uses it
 
     mutable std::mutex mutex_; // guards everything below
     std::condition_variable wake_;
@@ -78,6 +89,7 @@ private:
     std::deque<std::string> commands_;
     std::map<std::string, std::string> values_; // by path in upper case
     std::map<std::string, std::string> forces_;
+    std::optional<std::map<std::string, Variable>> variables_; // by path in upper case, once listed
     PlcStatus status_;
 
     std::thread thread_; // last: started once everything else exists

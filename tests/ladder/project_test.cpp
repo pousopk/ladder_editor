@@ -67,7 +67,8 @@ TEST_CASE("New blocks start with something to work on") {
 
 TEST_CASE("A project saves to a folder and loads back the same") {
     const auto folder = freshFolder("round_trip");
-    const auto project = sample();
+    auto project = sample();
+    project.watch = {WatchEntry{"start", "TRUE", "press start"}, WatchEntry{"t1.ET", "", ""}};
     REQUIRE(saveProject(project, folder).has_value());
     CHECK(fs::exists(folder / "project.json"));
     CHECK(fs::exists(folder / "Main.kop.json"));
@@ -83,6 +84,10 @@ TEST_CASE("A project saves to a folder and loads back the same") {
     CHECK(kop.find("\"rung\": \"(start | motor) stop => motor\"") != std::string::npos);
     CHECK(kop.find("\"address\": \"%IX0.0\"") != std::string::npos);
     CHECK(kop.find("\"initial\"") == std::string::npos); // empty fields aren't written
+    // The watch table is in project.json, without empty fields.
+    const auto json = read(folder / "project.json");
+    CHECK(json.find("\"modify\": \"TRUE\"") != std::string::npos);
+    CHECK(json.find("\"comment\": \"\"") == std::string::npos);
     // And the ST block is plain text.
     CHECK(read(folder / "Starter.st") == project.blocks[1].source);
 }

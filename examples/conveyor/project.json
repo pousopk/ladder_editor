@@ -14,5 +14,48 @@
     }
   ],
   "format": 1,
-  "name": "conveyor"
+  "name": "conveyor",
+  "watch": [
+    {
+      "comment": "wired normally closed: TRUE while not pressed",
+      "modify": "TRUE",
+      "path": "stop"
+    },
+    {
+      "comment": "wired normally closed: TRUE while not pressed",
+      "modify": "TRUE",
+      "path": "eStop"
+    },
+    {
+      "comment": "press start (set FALSE to release)",
+      "modify": "TRUE",
+      "path": "start"
+    },
+    {
+      "path": "running"
+    },
+    {
+      "comment": "a box enters the belt",
+      "modify": "TRUE",
+      "path": "boxAtStart"
+    },
+    {
+      "comment": "it reaches the end",
+      "modify": "TRUE",
+      "path": "boxAtEnd"
+    },
+    {
+      "comment": "jammed after 8 s",
+      "path": "travelTime"
+    },
+    {
+      "path": "jammed"
+    },
+    {
+      "path": "boxes"
+    },
+    {
+      "path": "boxesPerMinute"
+    }
+  ]
 }

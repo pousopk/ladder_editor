@@ -53,9 +53,20 @@ struct Block {
     bool operator==(const Block&) const = default;
 };
 
+// One line of the project's watch table: a variable to watch online, and a
+// value ready to write to it (like a watch and force table in TIA Portal).
+struct WatchEntry {
+    std::string path;   // as soft_plc names it: start, t1.ET, p1.demand
+    std::string modify; // the value to write, as ST: TRUE, 42, T#5s; empty for none
+    std::string comment;
+
+    bool operator==(const WatchEntry&) const = default;
+};
+
 struct Project {
     std::string name;
     std::vector<Block> blocks;
+    std::vector<WatchEntry> watch; // the watch table
 
     bool operator==(const Project&) const = default;
 };

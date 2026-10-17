@@ -113,3 +113,47 @@ TEST_CASE("The built-in example compiles, and runs in the simulator") {
     session->send("WRITE start TRUE");
     CHECK(ui.waitFor([&] { return session->boolean("motor") == true; }));
 }
+
+TEST_CASE("The watch table: lines are added and edited offline, and mark the project modified") {
+    Ui ui(startStop(), "");
+    ui.clickWidget("watch table");
+    CHECK(ui.window().showingWatchTable());
+    ui.clickWidget("+ line");
+    ui.clickWidget("path 0");
+    ui.type("motor");
+    ui.clickWidget("+ line"); // leaves the field (and adds a second line)
+    const auto& watch = ui.window().project().watch;
+    REQUIRE(watch.size() == 2);
+    CHECK(watch[0].path == "motor");
+    CHECK(ui.window().modified());
+    ui.clickWidget("delete 1");
+    CHECK(ui.window().project().watch.size() == 1);
+    ui.clickWidget("block 0"); // back to the block
+    CHECK_FALSE(ui.window().showingWatchTable());
+}
+
+TEST_CASE("The watch table online: values, Set all, Force and Unforce") {
+    auto project = startStop();
+    project.watch = {WatchEntry{"stop", "TRUE", ""}, WatchEntry{"START", "TRUE", "press start"},
+                     WatchEntry{"motor", "", ""}, WatchEntry{"nothing", "", ""}};
+    Ui ui(project, "");
+    REQUIRE(ui.window().simulate());
+    ui.clickWidget("watch table");
+    auto* session = ui.window().session();
+    REQUIRE(ui.waitFor([&] { return session->boolean("motor").has_value() && session->variablesKnown(); }));
+    const auto& watched = ui.window().watchTable().watched();
+    CHECK(std::find(watched.begin(), watched.end(), "start") != watched.end()); // spelled as declared
+    CHECK_FALSE(session->describe("nothing").has_value());                      // shown in red
+
+    ui.clickWidget("set all"); // stop TRUE, then start TRUE: the belt runs
+    CHECK(ui.waitFor([&] { return session->boolean("motor") == true; }));
+
+    ui.clickWidget("modify 0"); // force stop FALSE: the belt stops, and stays stopped
+    ui.key(ImGuiKey_A, ImGuiKey_LeftCtrl);
+    ui.type("FALSE");
+    ui.clickWidget("force 0");
+    CHECK(ui.waitFor([&] { return session->boolean("motor") == false; }));
+    REQUIRE(ui.waitFor([&] { return session->forces().size() == 1; }));
+    ui.clickWidget("unforce 0");
+    CHECK(ui.waitFor([&] { return session->forces().empty(); }));
+}

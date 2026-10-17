@@ -1,5 +1,6 @@
 #pragma once
 #include "app/kop_editor.hpp"
+#include "app/watch_table.hpp"
 #include "app/widget_positions.hpp"
 #include "ladder/block.hpp"
 #include "online/session.hpp"
@@ -35,6 +36,8 @@ public:
     bool modified() const;
     const ladder::Project& project() const { return project_; }
     std::size_t currentBlock() const { return current_; }
+    bool showingWatchTable() const { return showWatch_; }
+    const WatchTable& watchTable() const { return watchTable_; }
     KopEditor* kopEditor(std::size_t block) { return block < editors_.size() ? editors_[block].get() : nullptr; }
     const view::CodeEditor* codeEditor(std::size_t block) const {
         return block < codeEditors_.size() ? codeEditors_[block].get() : nullptr;
@@ -95,7 +98,11 @@ private:
     st_support::CodeCheck check_;                                // the project translated and compiled, as it was...
     std::optional<ladder::Project> checked_; // ...here: when the project differs, it's checked again
     std::vector<std::string> savedSources_;  // ST blocks: their text as saved
-    bool structureModified_ = false;         // blocks added, deleted or renamed since saving
+    bool structureModified_ = false;
+    WatchTable watchTable_;
+    bool showWatch_ = false; // the watch table is open instead of a block
+    std::vector<ladder::WatchEntry>
+        savedWatch_; // the watch table as saved         // blocks added, deleted or renamed since saving
     std::size_t current_ = 0;
     // Online mode.
     std::unique_ptr<online::Simulator> simulator_; // the PLC inside the editor, when simulating
