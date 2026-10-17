@@ -11,18 +11,18 @@ struct Size {
     std::size_t height = 1;
 };
 
-Size measure(const Series& series);
+Size measure(const Series& series, const BoxCatalog& boxes);
 
-Size measure(const Element& element) {
+Size measure(const Element& element, const BoxCatalog& boxes) {
     if (std::holds_alternative<Contact>(element)) {
         return {1, 1};
     }
     if (const auto* box = std::get_if<Box>(&element)) {
-        return {kBoxWidth, boxHeight(*box)};
+        return {kBoxWidth, boxHeight(*box, boxes)};
     }
     Size size{0, 0};
     for (const auto& branch : std::get<Parallel>(element).branches) {
-        const auto side = measure(branch);
+        const auto side = measure(branch, boxes);
         size.width = std::max(size.width, side.width);
         size.height += side.height;
     }
@@ -32,10 +32,10 @@ Size measure(const Element& element) {
 
 // A series is its elements side by side: their widths add up, and it's as
 // tall as its tallest element.
-Size measure(const Series& series) {
+Size measure(const Series& series, const BoxCatalog& boxes) {
     Size size{0, 1};
     for (const auto& element : series.elements) {
-        const auto part = measure(element);
+        const auto part = measure(element, boxes);
         size.width += part.width;
         size.height = std::max(size.height, part.height);
     }
@@ -46,7 +46,7 @@ Size measure(const Series& series) {
 // knows how wide its widest side is before placing any of them.
 class Placer {
 public:
-    explicit Placer(RungLayout& layout) : layout_(layout) {}
+    Placer(RungLayout& layout, const BoxCatalog& boxes) : layout_(layout), boxes_(boxes) {}
 
     // Returns the column where the series ends.
     std::size_t series(const Series& s, std::size_t column, std::size_t row, std::vector<std::size_t>& path) {
@@ -60,7 +60,7 @@ public:
 
 private:
     std::size_t element(const Element& e, std::size_t column, std::size_t row, std::vector<std::size_t>& path) {
-        const auto size = measure(e);
+        const auto size = measure(e, boxes_);
         if (!std::holds_alternative<Parallel>(e)) {
             layout_.items.push_back(PlacedItem{ElementPath{path}, column, row, size.width, size.height});
             return column + size.width;
@@ -78,7 +78,7 @@ private:
                 layout_.wires.push_back(Wire{sideRow, end, right}); // a short side: wire to the branch's end
             }
             lastSideRow = sideRow;
-            sideRow += measure(branch).height;
+            sideRow += measure(branch, boxes_).height;
         }
         if (lastSideRow > row) {
             layout_.links.push_back(Link{column, row, lastSideRow}); // where the branch splits...
@@ -88,23 +88,24 @@ private:
     }
 
     RungLayout& layout_;
+    const BoxCatalog& boxes_;
 };
 
 } // namespace
 
-std::size_t boxHeight(const Box& box) {
+std::size_t boxHeight(const Box& box, const BoxCatalog& boxes) {
     std::size_t pins = std::max(box.inputs.size(), box.outputs.size());
-    if (const auto* type = findBoxType(box.type)) {
+    if (const auto* type = boxes.find(box.type)) {
         pins = std::max({pins, type->inputs.size(), type->outputs.size()});
     }
     return 1 + pins;
 }
 
-RungLayout layOut(const Rung& rung) {
+RungLayout layOut(const Rung& rung, const BoxCatalog& boxes) {
     RungLayout layout;
     std::vector<std::size_t> path;
-    const auto logicEnd = Placer(layout).series(rung.logic, 0, 0, path);
-    const auto logicSize = measure(rung.logic);
+    const auto logicEnd = Placer(layout, boxes).series(rung.logic, 0, 0, path);
+    const auto logicSize = measure(rung.logic, boxes);
 
     layout.coilColumn = std::max(logicEnd, kMinimumCoilColumn);
     if (logicEnd < layout.coilColumn) {

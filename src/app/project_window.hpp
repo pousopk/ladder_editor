@@ -13,7 +13,8 @@ namespace app {
 
 // The editor's main window: the project's blocks on the left (like the
 // "Program blocks" folder in TIA Portal), the open block on the right, and
-// the project's problems under the block list. KOP blocks open in a
+// the project's problems under the block list. The whole project is
+// translated to ST and compiled by soft_plc whenever it changes. KOP blocks open in a
 // KopEditor (one per block, each with its own undo history); ST blocks in a
 // code editor with colours and live errors from soft_plc's compiler.
 class ProjectWindow {
@@ -37,8 +38,10 @@ public:
     void askToClose() { askClose_ = true; }
     bool closeConfirmed() const { return closeConfirmed_; }
 
-    // The first problem soft_plc's compiler finds in the ST blocks, if any.
-    const std::optional<st_support::StDiagnostic>& stDiagnostic() const { return stDiagnostic_; }
+    // The first problem soft_plc's compiler finds in the project, if any.
+    const std::optional<st_support::StDiagnostic>& codeError() const { return check_.error; }
+    // The project as ST, as it was last checked.
+    const ladder::TranslatedProject& translation() const { return check_.translation; }
 
 private:
     void drawHeader();
@@ -50,7 +53,8 @@ private:
     void drawDeletePopup();
     void drawClosePopup();
     void drawStBlock(std::size_t index);
-    void checkSt();
+    void checkCode();
+    void exportSt();
 
     bool save();
     void addBlock(ladder::Block block);
@@ -63,12 +67,13 @@ private:
     std::vector<std::unique_ptr<KopEditor>> editors_;            // one per block; null for ST blocks
     std::vector<std::unique_ptr<view::CodeEditor>> codeEditors_; // one per block; null for KOP blocks
     std::vector<std::size_t> coloredVersion_;                    // the text version each code editor's colours are for
-    std::optional<st_support::StDiagnostic> stDiagnostic_;
-    bool stChanged_ = true;                 // an ST block changed: check them again
-    std::vector<std::string> savedSources_; // ST blocks: their text as saved
-    bool structureModified_ = false;        // blocks added, deleted or renamed since saving
+    st_support::CodeCheck check_;                                // the project translated and compiled, as it was...
+    std::optional<ladder::Project> checked_; // ...here: when the project differs, it's checked again
+    std::vector<std::string> savedSources_;  // ST blocks: their text as saved
+    bool structureModified_ = false;         // blocks added, deleted or renamed since saving
     std::size_t current_ = 0;
-    std::string status_;
+    std::string status_; // the last action's error
+    std::string note_;   // the last action's result, when it worked
     WidgetPositions widgets_;
 
     // The popups' state.

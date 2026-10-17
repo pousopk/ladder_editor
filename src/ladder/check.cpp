@@ -20,6 +20,8 @@ std::string upper(std::string_view text) {
 // Collects problems while walking the rung.
 class Checker {
 public:
+    explicit Checker(const BoxCatalog& boxes) : boxes_(boxes) {}
+
     std::vector<Problem> run(const Rung& rung) {
         series(rung.logic);
         if (rung.coils.empty()) {
@@ -61,7 +63,7 @@ private:
     }
 
     void check(const Box& box) {
-        const auto* type = findBoxType(box.type);
+        const auto* type = boxes_.find(box.type);
         if (type == nullptr) {
             add(fmt::format("unknown box type '{}'", box.type));
             return;
@@ -69,15 +71,16 @@ private:
         if (box.instance.empty()) {
             add(fmt::format("the {} box has no instance", type->name));
         }
-        const auto pins = [&](const std::vector<Pin>& given, const std::vector<std::string_view>& allowed,
-                              std::string_view power, const char* kind) {
+        const auto pins = [&](const std::vector<Pin>& given, const std::vector<std::string>& allowed,
+                              const std::string& power, const char* kind) {
             std::set<std::string> seen;
             for (const auto& pin : given) {
                 const auto name = upper(pin.name);
-                if (name == power) {
+                if (name == upper(power)) {
                     add(fmt::format("{} of {} {} is connected to the rung's power, not to an operand", name, type->name,
                                     box.instance));
-                } else if (std::find(allowed.begin(), allowed.end(), name) == allowed.end()) {
+                } else if (std::none_of(allowed.begin(), allowed.end(),
+                                        [&](const std::string& a) { return upper(a) == name; })) {
                     add(fmt::format("{} has no {} called '{}'", type->name, kind, pin.name));
                 } else if (!seen.insert(name).second) {
                     add(fmt::format("{} of {} {} is connected twice", name, type->name, box.instance));
@@ -91,13 +94,14 @@ private:
         pins(box.outputs, type->outputs, type->powerOutput, "output");
     }
 
+    const BoxCatalog& boxes_;
     std::vector<Problem> problems_;
 };
 
 } // namespace
 
-std::vector<Problem> check(const Rung& rung) {
-    return Checker().run(rung);
+std::vector<Problem> check(const Rung& rung, const BoxCatalog& boxes) {
+    return Checker(boxes).run(rung);
 }
 
 } // namespace ladder

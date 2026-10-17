@@ -86,6 +86,8 @@ void CodeEditor::handleKeyboard() {
     const bool shift = io.KeyShift;
     const bool ctrl = io.KeyCtrl;
     const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key); };
+    // Keys that change the text do nothing in a read-only editor.
+    const auto edits = [&](ImGuiKey key) { return !readOnly_ && pressed(key); };
     auto& doc = document_;
     const auto before = std::pair{doc.cursor(), doc.version()};
     const int page = std::max(1, static_cast<int>(ImGui::GetWindowHeight() / lineHeight()) - 1);
@@ -93,17 +95,17 @@ void CodeEditor::handleKeyboard() {
     if (ctrl) {
         if (pressed(ImGuiKey_A))
             doc.selectAll();
-        if (pressed(ImGuiKey_Z))
+        if (edits(ImGuiKey_Z))
             shift ? doc.redo() : doc.undo();
-        if (pressed(ImGuiKey_Y))
+        if (edits(ImGuiKey_Y))
             doc.redo();
         if (pressed(ImGuiKey_C) && doc.hasSelection())
             ImGui::SetClipboardText(doc.selectedText().c_str());
-        if (pressed(ImGuiKey_X) && doc.hasSelection()) {
+        if (edits(ImGuiKey_X) && doc.hasSelection()) {
             ImGui::SetClipboardText(doc.selectedText().c_str());
             doc.backspace();
         }
-        if (pressed(ImGuiKey_V)) {
+        if (edits(ImGuiKey_V)) {
             if (const char* clipboard = ImGui::GetClipboardText()) {
                 doc.insert(clipboard);
             }
@@ -125,18 +127,18 @@ void CodeEditor::handleKeyboard() {
             doc.moveHome(shift);
         if (pressed(ImGuiKey_End))
             doc.moveEnd(shift);
-        if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter))
+        if (edits(ImGuiKey_Enter) || edits(ImGuiKey_KeypadEnter))
             doc.newline();
-        if (pressed(ImGuiKey_Backspace))
+        if (edits(ImGuiKey_Backspace))
             doc.backspace();
-        if (pressed(ImGuiKey_Delete))
+        if (edits(ImGuiKey_Delete))
             doc.deleteForward();
-        if (pressed(ImGuiKey_Tab))
+        if (edits(ImGuiKey_Tab))
             shift ? doc.unindent() : doc.indent();
         // Typed characters (the backend turns key presses into these,
         // with the keyboard layout applied).
         for (const ImWchar c : io.InputQueueCharacters) {
-            if (c >= 32 && c != 127) {
+            if (c >= 32 && c != 127 && !readOnly_) {
                 doc.insert(utf8(c));
             }
         }

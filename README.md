@@ -48,7 +48,7 @@ ctest --test-dir build --output-on-failure
 
 A project is a folder: `project.json` lists the blocks, and each block has its own file. KOP blocks are `Name.kop.json` (the interface, and each network in the one-line notation); ST blocks are plain `Name.st` files.
 
-The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours; as you type, soft_plc compiles the project's ST blocks, and its first error is underlined in place, with its message. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours. Whenever anything changes, the KOP blocks are translated to ST and soft_plc compiles the whole project; its first error is underlined in place in an ST block, or shown under its network in a KOP block. Tick **ST** in a KOP block's toolbar to see its translation next to the networks; **Export ST** writes the whole project as `<project>.st` for soft_plc. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
 
 ## Editing ST
 
@@ -61,7 +61,7 @@ Click an element (or a network's title) to select it, then:
 | Key | Does |
 |---|---|
 | C / N | insert a normally open / closed contact after the selection |
-| B | insert a box: a timer, counter, edge or flip-flop (arrows + Enter, or click) |
+| B | insert a box: a timer, counter, edge, flip-flop or one of the project's function blocks (arrows + Enter, or click) |
 | P / Shift+P | put a branch around the selection / add a side to its branch |
 | O | add a coil |
 | Ctrl+← / Ctrl+→ | move the selection left / right |
@@ -83,8 +83,9 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `src/ladder/edit.hpp` | The structured edit operations |
 | `src/ladder/history.hpp` | Undo and redo: commands and the history |
 | `src/ladder/block.hpp`, `project_file.hpp` | Blocks, projects and their rules; project folders on disk |
+| `src/ladder/translate.hpp` | KOP blocks translated to ST, with each line traced back to its network |
 | `src/text/` | The code editor's text: lines, cursor, selection, editing, undo |
-| `src/st_support/` | ST colours and live errors, from `soft_plc`'s lexer and compiler |
+| `src/st_support/` | ST colours, the project's box types, and the whole project checked by `soft_plc`'s compiler |
 | `src/view/` | Drawing a rung (`rung_view.hpp`) and the code editor widget (`code_editor.hpp`), with Dear ImGui |
 | `src/app/` | The application: `main.cpp`, the project window and the KOP editor |
 | `examples/` | Example projects |

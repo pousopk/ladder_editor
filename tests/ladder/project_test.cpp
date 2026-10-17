@@ -153,19 +153,22 @@ TEST_CASE("Project rules") {
     auto bad = sample();
     bad.blocks[0].variables.push_back(Variable{"2fast", "BOOL", Section::Local, "", "", ""});
     bad.blocks[0].variables.push_back(Variable{"START", "INT", Section::Input, "", "", ""});
+    bad.blocks[0].variables.push_back(Variable{"_KOP_power1", "BOOL", Section::Local, "", "", ""});
     bad.blocks[2].variables.push_back(Variable{"lamp", "", Section::Output, "", "%QX0.1", ""});
     bad.blocks[2].variables.push_back(Variable{"Scale", "REAL", Section::Local, "", "", ""});
     bad.blocks.push_back(newBlock("Types", BlockKind::Types, Language::Kop));
-    CHECK(messages(bad) == std::vector<std::string>{
-                               "Main: '2fast' isn't a valid variable name",
-                               "Main: 'START' is declared twice",
-                               "Main: a PROGRAM has no VAR_INPUT ('START')",
-                               "Scale: 'lamp' has no type",
-                               "Scale: a FUNCTION has no VAR_OUTPUT ('lamp')",
-                               "Scale: 'lamp': AT addresses are only allowed in the PROGRAM",
-                               "Scale: 'Scale' is the function's own name, which holds its result",
-                               "Types: a TYPE block can only be written in ST",
-                           });
+    CHECK(messages(bad) ==
+          std::vector<std::string>{
+              "Main: '2fast' isn't a valid variable name",
+              "Main: 'START' is declared twice",
+              "Main: a PROGRAM has no VAR_INPUT ('START')",
+              "Main: '_KOP_power1': names starting with _kop_ are kept for the code generated from KOP",
+              "Scale: 'lamp' has no type",
+              "Scale: a FUNCTION has no VAR_OUTPUT ('lamp')",
+              "Scale: 'lamp': AT addresses are only allowed in the PROGRAM",
+              "Scale: 'Scale' is the function's own name, which holds its result",
+              "Types: a TYPE block can only be written in ST",
+          });
 }
 
 TEST_CASE("The example project loads, has no problems, and saves back unchanged") {
@@ -173,8 +176,12 @@ TEST_CASE("The example project loads, has no problems, and saves back unchanged"
     const auto project = loadProject(example);
     REQUIRE_MESSAGE(project.has_value(), (project ? "" : project.error()));
     CHECK(checkProject(*project).empty());
+    // BoxRate is the project's ST block: its box type comes from its text
+    // (st_support::projectBoxes, tested in tests/st); here it's written out.
+    BoxCatalog boxes;
+    boxes.add(BoxType{"BoxRate", "arrived", "tooFast", {"limit"}, {"perMinute"}});
     for (const auto& rung : project->blocks[0].networks) {
-        CHECK(check(rung).empty());
+        CHECK(check(rung, boxes).empty());
     }
     // Saving it again writes exactly the same files: the example is in the editor's own format.
     const auto copy = freshFolder("example_copy");

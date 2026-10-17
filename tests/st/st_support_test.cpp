@@ -1,3 +1,4 @@
+#include "ladder/notation.hpp"
 #include "st_support/diagnostics.hpp"
 #include "st_support/highlight.hpp"
 #include <algorithm>
@@ -93,15 +94,15 @@ TEST_CASE("An unclosed comment colours the rest as a comment") {
 
 // ---------------------------------------------------------------- Diagnostics
 
-TEST_CASE("Correct ST blocks have no diagnostic; a KOP PROGRAM gets a stand-in") {
+TEST_CASE("Correct blocks have no diagnostic, KOP and ST together") {
     ladder::Project project;
     project.blocks.push_back(ladder::newBlock("Main", BlockKind::Program, Language::Kop));
     project.blocks.push_back(st("Mixer", BlockKind::FunctionBlock,
                                 "FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nVAR_OUTPUT on : BOOL; END_VAR\n"
                                 "on := run;\nEND_FUNCTION_BLOCK\n"));
-    CHECK_FALSE(checkStBlocks(project).has_value());
+    CHECK_FALSE(checkCode(project).error.has_value());
     project.blocks.push_back(ladder::newBlock("Scale", BlockKind::Function, Language::St)); // the skeleton compiles too
-    CHECK_FALSE(checkStBlocks(project).has_value());
+    CHECK_FALSE(checkCode(project).error.has_value());
 }
 
 TEST_CASE("An error is reported in its block, at its line and column, with soft_plc's message") {
@@ -111,7 +112,7 @@ TEST_CASE("An error is reported in its block, at its line and column, with soft_
     project.blocks.push_back(st("Main", BlockKind::Program,
                                 "PROGRAM Main\nVAR m : Mixer; n : INT; END_VAR\n    m(run := TRUE);\n"
                                 "    n := m.run + 1;\nEND_PROGRAM\n"));
-    const auto diagnostic = checkStBlocks(project);
+    const auto diagnostic = checkCode(project).error;
     REQUIRE(diagnostic.has_value());
     CHECK(diagnostic->block == 1);
     CHECK(diagnostic->line == 3);    // the 4th line of Main
@@ -122,18 +123,18 @@ TEST_CASE("An error is reported in its block, at its line and column, with soft_
 TEST_CASE("A block's text must declare the block the project says it is") {
     ladder::Project project;
     project.blocks.push_back(st("Mixer", BlockKind::FunctionBlock, "FUNCTION_BLOCK Blender\nEND_FUNCTION_BLOCK\n"));
-    auto diagnostic = checkStBlocks(project);
+    auto diagnostic = checkCode(project).error;
     REQUIRE(diagnostic.has_value());
     CHECK(diagnostic->message ==
           "the text declares FUNCTION_BLOCK Blender, but the block is called Mixer: rename one of them");
     CHECK(diagnostic->column == 15);
 
     project.blocks[0].source = "PROGRAM Mixer\nEND_PROGRAM\n";
-    CHECK(checkStBlocks(project)->message ==
+    CHECK(checkCode(project).error->message ==
           "block Mixer is a FUNCTION_BLOCK: its text should start with FUNCTION_BLOCK Mixer");
 
     project.blocks[0].source = "FUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK\nFUNCTION_BLOCK Other\nEND_FUNCTION_BLOCK\n";
-    diagnostic = checkStBlocks(project);
+    diagnostic = checkCode(project).error;
     REQUIRE(diagnostic.has_value());
     CHECK(diagnostic->message ==
           "a block holds just its own FUNCTION_BLOCK: put this FUNCTION_BLOCK in a block of its own");
@@ -146,10 +147,76 @@ TEST_CASE("Types from a TYPE block are known to the other ST blocks") {
         st("Shapes", BlockKind::Types, "TYPE\n    Point : STRUCT x : REAL; y : REAL; END_STRUCT;\nEND_TYPE\n"));
     project.blocks.push_back(
         st("Main", BlockKind::Program, "PROGRAM Main\nVAR p : Point; END_VAR\n    p.x := 1.0;\nEND_PROGRAM\n"));
-    CHECK_FALSE(checkStBlocks(project).has_value());
+    CHECK_FALSE(checkCode(project).error.has_value());
     project.blocks[1].source = "PROGRAM Main\nVAR p : Point; END_VAR\n    p.z := 1.0;\nEND_PROGRAM\n";
-    const auto diagnostic = checkStBlocks(project);
+    const auto diagnostic = checkCode(project).error;
     REQUIRE(diagnostic.has_value());
     CHECK(diagnostic->block == 1);
     CHECK(diagnostic->message == "Point has no field 'z'");
+}
+
+TEST_CASE("The project's function blocks are boxes: KOP ones from their interface, ST ones from their text") {
+    ladder::Project project;
+    auto valve = ladder::newBlock("Valve", BlockKind::FunctionBlock, Language::Kop);
+    valve.variables = {{"open", "BOOL", ladder::Section::Input, "", "", ""},
+                       {"delay", "TIME", ladder::Section::Input, "", "", ""},
+                       {"isOpen", "BOOL", ladder::Section::Output, "", "", ""},
+                       {"timer", "TON", ladder::Section::Local, "", "", ""}};
+    project.blocks.push_back(valve);
+    project.blocks.push_back(st("Rate", BlockKind::FunctionBlock,
+                                "FUNCTION_BLOCK Rate\nVAR_INPUT pulse : BOOL; END_VAR\n"
+                                "VAR_OUTPUT perMinute : INT; END_VAR\nEND_FUNCTION_BLOCK\n"));
+    project.blocks.push_back(st("NoPower", BlockKind::FunctionBlock,
+                                "FUNCTION_BLOCK NoPower\nVAR_INPUT x : INT; END_VAR\nEND_FUNCTION_BLOCK\n"));
+
+    const auto boxes = projectBoxes(project);
+    const auto* kop = boxes.find("VALVE");
+    REQUIRE(kop != nullptr);
+    CHECK(kop->powerInput == "open");
+    CHECK(kop->powerOutput == "isOpen");
+    CHECK(kop->inputs == std::vector<std::string>{"delay"});
+    const auto* rate = boxes.find("Rate");
+    REQUIRE(rate != nullptr);
+    CHECK(rate->powerInput == "pulse");
+    CHECK(rate->powerOutput.empty()); // the power passes through
+    CHECK(rate->outputs == std::vector<std::string>{"perMinute"});
+    CHECK(boxes.find("NoPower") == nullptr);
+    CHECK(boxes.find("TON") != nullptr);
+}
+
+TEST_CASE("Errors in KOP blocks are traced back to their network") {
+    ladder::Project project;
+    auto main = ladder::newBlock("Main", BlockKind::Program, Language::Kop);
+    main.variables = {{"a", "BOOL", ladder::Section::Local, "", "", ""},
+                      {"count", "INT", ladder::Section::Local, "", "", ""},
+                      {"r", "Rate", ladder::Section::Local, "", "", ""}};
+    main.networks = {*ladder::parseRung("a => a"), *ladder::parseRung("a {Rate r, perMinute => count} => a"),
+                     *ladder::parseRung("a => missing")};
+    project.blocks.push_back(main);
+    project.blocks.push_back(st("Rate", BlockKind::FunctionBlock,
+                                "FUNCTION_BLOCK Rate\nVAR_INPUT pulse : BOOL; END_VAR\n"
+                                "VAR_OUTPUT perMinute : INT; END_VAR\nEND_FUNCTION_BLOCK\n"));
+    auto check = checkCode(project);
+    REQUIRE(check.error.has_value());
+    CHECK(check.error->block == 0);
+    CHECK(check.error->network == 2u);
+    CHECK(check.error->message.find("missing") != std::string::npos);
+
+    project.blocks[0].networks.pop_back();
+    CHECK_FALSE(checkCode(project).error.has_value());
+
+    project.blocks[0].variables[1].type = "Gadget"; // an error in the interface: no network
+    check = checkCode(project);
+    REQUIRE(check.error.has_value());
+    CHECK(check.error->block == 0);
+    CHECK_FALSE(check.error->network.has_value());
+
+    project.blocks[0].variables[1].type = "INT";
+    project.blocks[1].source = "FUNCTION_BLOCK Rate\nVAR_INPUT pulse : BOOL; END_VAR\n"
+                               "VAR_OUTPUT perMinute : INT; END_VAR\n    perMinute := pulse;\nEND_FUNCTION_BLOCK\n";
+    check = checkCode(project);
+    REQUIRE(check.error.has_value());
+    CHECK(check.error->block == 1);
+    CHECK(check.error->line == 3);
+    CHECK_FALSE(check.error->network.has_value());
 }

@@ -57,6 +57,13 @@
       "type": "BOOL"
     },
     {
+      "address": "%QX0.3",
+      "comment": "more than 30 boxes a minute",
+      "name": "tooFast",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
       "name": "running",
       "section": "VAR",
       "type": "BOOL"
@@ -108,10 +115,15 @@
       "type": "BOOL"
     },
     {
-      "comment": "boxes per minute, in ST",
+      "comment": "boxes per minute: a function block written in ST",
       "name": "rate",
       "section": "VAR",
       "type": "BoxRate"
+    },
+    {
+      "name": "boxesPerMinute",
+      "section": "VAR",
+      "type": "INT"
     }
   ],
   "networks": [
@@ -133,7 +145,7 @@
     },
     {
       "comment": "Count boxes: one per rising edge of the end sensor",
-      "rung": "{R_TRIG arrived} {CTU boxCount, R := resetButton, PV := 100, CV => boxes} => batchFull"
+      "rung": "boxAtEnd {R_TRIG arrived} {CTU boxCount, R := resetButton, PV := 100, CV => boxes} => batchFull"
     },
     {
       "comment": "The warning lamp blinks while jammed: two timers, each starting the other",
@@ -141,6 +153,10 @@
     },
     {
       "rung": "jammed blinkOn.Q {TON blinkOff, PT := T#500ms} => blinkPhase"
+    },
+    {
+      "comment": "Boxes per minute, from the ST block BoxRate; tooFast lights above 30",
+      "rung": "boxAtEnd {BoxRate rate, limit := 30, perMinute => boxesPerMinute} => tooFast"
     }
   ]
 }

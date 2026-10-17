@@ -38,8 +38,8 @@ TEST_CASE("The standard boxes and how power goes through them") {
     CHECK(ton->name == "TON");
     CHECK(ton->powerInput == "IN");
     CHECK(ton->powerOutput == "Q");
-    CHECK(ton->inputs == std::vector<std::string_view>{"PT"});
-    CHECK(ton->outputs == std::vector<std::string_view>{"ET"});
+    CHECK(ton->inputs == std::vector<std::string>{"PT"});
+    CHECK(ton->outputs == std::vector<std::string>{"ET"});
     CHECK(findBoxType("CTU")->powerInput == "CU");
     CHECK(findBoxType("RS")->powerOutput == "Q1");
     CHECK(findBoxType("MOTOR") == nullptr);

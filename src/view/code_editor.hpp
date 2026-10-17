@@ -37,6 +37,8 @@ public:
 
     void setColors(std::vector<ColoredSpan> spans) { spans_ = std::move(spans); }
     void setError(std::optional<ErrorMark> error) { error_ = std::move(error); }
+    // Read-only: the text can be selected and copied, not changed.
+    void setReadOnly(bool readOnly) { readOnly_ = readOnly; }
 
     // Draws the editor as a child window of `size` and handles its input
     // while it has the focus. Returns true when the text changed this frame.
@@ -52,6 +54,7 @@ private:
     text::TextDocument document_;
     std::vector<ColoredSpan> spans_;
     std::optional<ErrorMark> error_;
+    bool readOnly_ = false;
     bool selectingWithMouse_ = false;
     bool cursorMoved_ = false; // scroll it into view after drawing
 };

@@ -1,4 +1,5 @@
 #include "app/kop_editor.hpp"
+#include "app/st_colors.hpp"
 #include "ladder/boxes.hpp"
 #include "ladder/check.hpp"
 #include "ladder/notation.hpp"
@@ -89,8 +90,9 @@ template <class Path> ItemResult toItem(const tl::expected<std::optional<Path>, 
 
 } // namespace
 
-void KopEditor::draw(Block& block) {
+void KopEditor::draw(Block& block, const KopContext& context) {
     block_ = &block;
+    context_ = &context;
     widgets_.clear();
     // A popup closed by a click elsewhere is already closed when the frame
     // starts: record its edit before that click does anything else.
@@ -100,11 +102,18 @@ void KopEditor::draw(Block& block) {
     drawToolbar();
     ImGui::Separator();
     const float detailsHeight = ImGui::GetTextLineHeightWithSpacing() * 7.0F;
-    ImGui::BeginChild("networks", ImVec2(0, -detailsHeight), ImGuiChildFlags_None,
+    const float stWidth = showSt_ ? std::max(ImGui::GetContentRegionAvail().x * 0.4F, 300.0F) : 0.0F;
+    ImGui::BeginChild("networks", ImVec2(showSt_ ? -stWidth : 0.0F, -detailsHeight), ImGuiChildFlags_None,
                       ImGuiWindowFlags_HorizontalScrollbar);
     drawInterface();
     drawNetworks();
     ImGui::EndChild();
+    if (showSt_) {
+        ImGui::SameLine();
+        ImGui::BeginChild("st", ImVec2(0.0F, -detailsHeight));
+        drawSt();
+        ImGui::EndChild();
+    }
     ImGui::Separator();
     drawDetails();
     handleShortcuts(); // before the popups: the Enter that closes one mustn't open it again
@@ -126,7 +135,11 @@ void KopEditor::drawToolbar() {
     }
     ImGui::SetItemTooltip("Redo %s (Ctrl+Y)", history_.redoDescription().c_str());
     ImGui::EndDisabled();
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 220.0F);
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 280.0F);
+    ImGui::Checkbox("ST", &showSt_);
+    ImGui::SetItemTooltip("Show the block as Structured Text: the code soft_plc runs");
+    widgets_.remember("show st");
+    ImGui::SameLine();
     ImGui::SetNextItemWidth(160.0F);
     ImGui::SliderFloat("Zoom", &zoom_, 0.6F, 2.0F, "%.1fx");
 
@@ -309,6 +322,9 @@ void KopEditor::drawNetworks() {
     if (networks.empty()) {
         ImGui::TextColored(kDim, "No networks yet: press Ctrl+N or click +Network to add one.");
     }
+    if (context_->error && !context_->error->network) {
+        ImGui::TextColored(kProblem, "soft_plc, in the interface: %s", context_->error->message.c_str());
+    }
     std::optional<std::size_t> deleteRequest;
     std::optional<std::pair<std::size_t, int>> moveRequest;
     for (std::size_t i = 0; i < networks.size(); ++i) {
@@ -336,9 +352,9 @@ void KopEditor::drawNetworks() {
         }
 
         const std::optional<ItemPath> selected = networkSelected ? selection_->item : std::nullopt;
-        const auto layout = layOut(rung); // cheap: recomputed every frame, so it's never stale
+        const auto layout = layOut(rung, boxes()); // cheap: recomputed every frame, so it's never stale
         origins_[i] = ImGui::GetCursorScreenPos();
-        const auto shown = view::drawRung(rung, layout, static_cast<int>(i), selected, zoom_);
+        const auto shown = view::drawRung(rung, layout, static_cast<int>(i), selected, zoom_, boxes());
         if (shown.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             select(i, *shown.hovered);
         }
@@ -348,9 +364,7 @@ void KopEditor::drawNetworks() {
         if (shown.overRung && !shown.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             select(i, std::nullopt); // a click between the elements selects the network
         }
-        for (const auto& problem : check(rung)) {
-            ImGui::TextColored(kProblem, "  %s", problem.message.c_str());
-        }
+        drawProblems(i);
         ImGui::PopID();
         ImGui::Spacing();
         ImGui::Separator();
@@ -363,6 +377,54 @@ void KopEditor::drawNetworks() {
     }
     if (moveRequest) {
         moveNetwork(moveRequest->first, moveRequest->second);
+    }
+}
+
+// What's wrong with a network: the rung's own rules first; if it keeps
+// those, what stopped its translation, or soft_plc's error in its code.
+void KopEditor::drawProblems(std::size_t network) {
+    const auto problems = check(block_->networks[network], boxes());
+    for (const auto& problem : problems) {
+        ImGui::TextColored(kProblem, "  %s", problem.message.c_str());
+    }
+    if (!problems.empty() || context_->translation == nullptr) {
+        return;
+    }
+    for (const auto& problem : context_->translation->problems) {
+        if (problem.network == network) {
+            ImGui::TextColored(kProblem, "  %s", problem.message.c_str());
+        }
+    }
+    const auto& error = context_->error;
+    if (error && error->network == network) {
+        ImGui::TextColored(kProblem, "  soft_plc: %s", error->message.c_str());
+        widgets_.remember(fmt::format("error {}", network));
+    }
+}
+
+// The block as ST, read-only, coloured, with soft_plc's error marked.
+void KopEditor::drawSt() {
+    if (context_->translation == nullptr) {
+        ImGui::TextColored(kDim, "Not translated yet.");
+        return;
+    }
+    const auto& text = context_->translation->text;
+    if (text != stShown_) {
+        // A new editor for the new text (it's read-only: nothing is lost).
+        stView_ = view::CodeEditor(text);
+        stView_.setReadOnly(true);
+        stView_.setColors(stColors(text));
+        stShown_ = text;
+    }
+    const auto& error = context_->error;
+    stView_.setError(error ? std::optional(view::ErrorMark{error->line, error->column, error->message}) : std::nullopt);
+    const float messageHeight = ImGui::GetTextLineHeightWithSpacing() + 4.0F;
+    stView_.draw("##st", ImVec2(-1.0F, -messageHeight));
+    widgets_.remember("st view");
+    if (error && !error->network) {
+        ImGui::TextColored(kProblem, "line %zu: %s", error->line + 1, error->message.c_str());
+    } else {
+        ImGui::TextColored(kDim, "Generated from the networks: edit them, not this.");
     }
 }
 
@@ -474,7 +536,7 @@ void KopEditor::drawEditPopup() {
         } else if (auto* box = std::get_if<Box>(element)) {
             ImGui::SetNextItemWidth(160.0F);
             if (ImGui::BeginCombo("Type", box->type.c_str())) {
-                for (const auto& type : standardBoxTypes()) {
+                for (const auto& type : boxes().all()) {
                     if (ImGui::Selectable(std::string(type.name).c_str(), type.name == box->type)) {
                         box->type = type.name;
                     }
@@ -486,11 +548,11 @@ void KopEditor::drawEditPopup() {
             }
             ImGui::SetNextItemWidth(160.0F);
             ImGui::InputText("Instance", &box->instance);
-            if (const auto* type = findBoxType(box->type)) {
-                for (const auto pin : type->inputs) {
+            if (const auto* type = boxes().find(box->type)) {
+                for (const auto& pin : type->inputs) {
                     pinField(fmt::format("{} :=", pin).c_str(), pin, box->inputs);
                 }
-                for (const auto pin : type->outputs) {
+                for (const auto& pin : type->outputs) {
                     pinField(fmt::format("{} =>", pin).c_str(), pin, box->outputs);
                 }
             }
@@ -525,7 +587,7 @@ void KopEditor::drawBoxPopup() {
         return;
     }
     // Arrow keys and Enter work as well as the mouse: B, Down, Enter.
-    const auto& types = standardBoxTypes();
+    const auto& types = boxes().all();
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
         boxChoice_ = (boxChoice_ + 1) % types.size();
     }

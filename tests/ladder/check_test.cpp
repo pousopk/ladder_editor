@@ -62,3 +62,20 @@ TEST_CASE("Problems the notation can't write, built by hand") {
     CHECK(problemsOf(blanks) == std::vector<std::string>{"a contact has no operand", "the TON box has no instance",
                                                          "PT of TON  has no operand", "a coil has no operand"});
 }
+
+TEST_CASE("Boxes of the project's own function blocks, with pins in any case") {
+    BoxCatalog boxes;
+    boxes.add(BoxType{"BoxRate", "arrived", "tooFast", {"limit"}, {"perMinute"}});
+    const auto messages = [&](const char* text) {
+        std::vector<std::string> result;
+        for (const auto& problem : check(parseRung(text).value(), boxes)) {
+            result.push_back(problem.message);
+        }
+        return result;
+    };
+    CHECK(messages("a {BoxRate r, LIMIT := 30, perminute => n} => x").empty());
+    CHECK(messages("a {BoxRate r, Arrived := b} => x") ==
+          std::vector<std::string>{"ARRIVED of BoxRate r is connected to the rung's power, not to an operand"});
+    CHECK(messages("a {BoxRate r, rate => n} => x") == std::vector<std::string>{"BoxRate has no output called 'rate'"});
+    CHECK(problemsOf("a {BoxRate r} => x") == std::vector<std::string>{"unknown box type 'BoxRate'"});
+}

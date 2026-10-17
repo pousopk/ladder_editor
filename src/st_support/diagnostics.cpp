@@ -1,6 +1,7 @@
 #include "st_support/diagnostics.hpp"
 #include "st/analyzer.hpp"
 #include "st/lexer.hpp"
+#include "st/parser.hpp"
 #include "util/text.hpp"
 #include <algorithm>
 #include <fmt/format.h>
@@ -41,7 +42,7 @@ std::optional<StDiagnostic> checkHeader(const ladder::Block& block, std::size_t 
     const auto expected =
         fmt::format("{}{}", ladder::kindName(block.kind), block.kind == BlockKind::Types ? "" : " " + block.name);
     const auto problem = [&](const softplc::st::Token& at, std::string message) {
-        return StDiagnostic{index, at.location.line - 1, at.location.column - 1, std::move(message)};
+        return StDiagnostic{index, at.location.line - 1, at.location.column - 1, std::move(message), std::nullopt};
     };
     const auto& first = tokens->front();
     if (first.kind != keywordOf(block.kind)) {
@@ -66,52 +67,86 @@ std::optional<StDiagnostic> checkHeader(const ladder::Block& block, std::size_t 
     return std::nullopt;
 }
 
-std::size_t lineCount(const std::string& text) {
-    return static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n')) + 1;
+// The box type of an ST function block, from its text.
+std::optional<ladder::BoxType> stBox(const ladder::Block& block) {
+    const auto pous = softplc::st::parseFunctionBlocks(block.source);
+    if (!pous || pous->size() != 1) {
+        return std::nullopt; // the check reports what's wrong with the text
+    }
+    std::vector<ladder::PinDeclaration> pins;
+    for (const auto& variable : pous->front().variables) {
+        if (variable.section != softplc::st::VarSection::Local) {
+            pins.push_back(ladder::PinDeclaration{variable.name, softplc::st::formatTypeSpec(variable.typeSpec),
+                                                  variable.section == softplc::st::VarSection::Input});
+        }
+    }
+    return ladder::boxTypeFromInterface(pous->front().name, pins);
 }
 
 } // namespace
 
-std::optional<StDiagnostic> checkStBlocks(const ladder::Project& project) {
-    // Every ST block's text, one after the other, remembering where each starts.
-    std::string combined;
-    std::vector<std::pair<std::size_t, std::size_t>> starts; // (first line in `combined`, block index)
-    bool stProgram = false;
-    std::size_t line = 0;
+ladder::BoxCatalog projectBoxes(const ladder::Project& project) {
+    ladder::BoxCatalog boxes;
+    for (const auto& block : project.blocks) {
+        if (block.kind != BlockKind::FunctionBlock) {
+            continue;
+        }
+        std::optional<ladder::BoxType> type;
+        if (block.language == ladder::Language::St) {
+            type = stBox(block);
+        } else {
+            std::vector<ladder::PinDeclaration> pins;
+            for (const auto& variable : block.variables) {
+                if (variable.section != ladder::Section::Local) {
+                    pins.push_back(ladder::PinDeclaration{variable.name, variable.type,
+                                                          variable.section == ladder::Section::Input});
+                }
+            }
+            type = ladder::boxTypeFromInterface(block.name, pins);
+        }
+        if (type) {
+            boxes.add(std::move(*type));
+        }
+    }
+    return boxes;
+}
+
+CodeCheck checkCode(const ladder::Project& project) {
+    CodeCheck result{projectBoxes(project), {}, std::nullopt};
     for (std::size_t i = 0; i < project.blocks.size(); ++i) {
         const auto& block = project.blocks[i];
         if (block.language != ladder::Language::St) {
             continue;
         }
         if (auto header = checkHeader(block, i)) {
-            return header;
+            result.error = std::move(header);
+            return result;
         }
-        starts.emplace_back(line, i);
-        combined += block.source;
-        combined += '\n';
-        line += lineCount(block.source);
-        stProgram = stProgram || block.kind == BlockKind::Program;
     }
-    if (starts.empty()) {
-        return std::nullopt;
-    }
-    if (!stProgram) {
-        combined += "PROGRAM StandIn END_PROGRAM\n"; // the KOP PROGRAM, until it's translated
+    result.translation = ladder::translateProject(project, result.boxes);
+    auto source = result.translation.text;
+    if (std::none_of(project.blocks.begin(), project.blocks.end(),
+                     [](const ladder::Block& b) { return b.kind == BlockKind::Program; })) {
+        source += "PROGRAM StandIn END_PROGRAM\n"; // the project's rules already say a PROGRAM is missing
     }
 
-    const auto compiled = softplc::st::compileProgram(combined);
+    const auto compiled = softplc::st::compileProgram(source);
     if (compiled) {
-        return std::nullopt;
+        return result;
     }
-    // Back from a line in the combined text to the block it came from.
+    // Back from a line of the whole text to the block (and network) it came from.
     const auto errorLine = compiled.error().location.line - 1;
-    auto it = std::upper_bound(starts.begin(), starts.end(), std::pair{errorLine, project.blocks.size()});
-    if (it == starts.begin()) {
-        return std::nullopt; // can't happen: the first block starts at line 0
+    const auto place = result.translation.blockAt(errorLine);
+    if (!place) {
+        return result; // can't happen: the first block starts at line 0
     }
-    --it;
-    return StDiagnostic{it->second, errorLine - it->first, compiled.error().location.column - 1,
-                        compiled.error().message};
+    const auto [block, line] = *place;
+    std::optional<std::size_t> network;
+    if (project.blocks[block].language == ladder::Language::Kop) {
+        network = result.translation.parts[block].translation.networkAt(line);
+    }
+    result.error = StDiagnostic{block, line, compiled.error().location.column - 1, compiled.error().message, network};
+    return result;
 }
 
 } // namespace st_support

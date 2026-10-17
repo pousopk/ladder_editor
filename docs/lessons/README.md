@@ -10,3 +10,4 @@ What each milestone teaches, about PLC programming and about C++, with pointers 
 | 4. Undo and redo | [04-undo-redo.md](04-undo-redo.md) |
 | 5. Projects | [05-projects.md](05-projects.md) |
 | 6. The ST editor | [06-st-editor.md](06-st-editor.md) |
+| 7. Translating KOP to ST | [07-kop-to-st.md](07-kop-to-st.md) |

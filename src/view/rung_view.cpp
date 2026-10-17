@@ -110,7 +110,7 @@ std::string operandOf(const std::vector<Pin>& pins, std::string_view name) {
     return "...";
 }
 
-void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box& box) {
+void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box& box, const BoxCatalog& boxes) {
     const float left = g.x(item.column);
     const float right = g.x(item.column + item.width);
     const float y = g.y(item.row);
@@ -127,7 +127,7 @@ void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box&
     operandText(draw, center, boxTop - line - g.scale(2.0F), box.instance);
     centeredText(draw, center, boxTop + g.scale(2.0F), kText, box.type);
 
-    const auto* type = findBoxType(box.type);
+    const auto* type = boxes.find(box.type);
     if (type == nullptr) {
         return; // unknown: just the frame and the names (check() reports it)
     }
@@ -168,7 +168,7 @@ ImVec2 itemCenter(const PlacedItem& item, ImVec2 origin, float zoom) {
 }
 
 RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std::optional<ItemPath>& selected,
-                  float zoom) {
+                  float zoom, const BoxCatalog& boxes) {
     const Metrics m;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 size{(m.rail * 2.0F + static_cast<float>(layout.width) * m.column) * zoom,
@@ -219,7 +219,7 @@ RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std:
         if (const auto* contact = std::get_if<Contact>(element)) {
             drawContact(draw, g, item, *contact);
         } else if (const auto* box = std::get_if<Box>(element)) {
-            drawBox(draw, g, item, *box);
+            drawBox(draw, g, item, *box, boxes);
         }
     }
     return result;

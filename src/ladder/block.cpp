@@ -1,4 +1,5 @@
 #include "ladder/block.hpp"
+#include "ladder/translate.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fmt/format.h>
@@ -165,6 +166,9 @@ std::vector<ProjectProblem> checkProject(const Project& project) {
                 add(block.name, fmt::format("'{}' is declared twice", variable.name));
             } else if (upper(variable.name) == upper(block.name) && block.kind == BlockKind::Function) {
                 add(block.name, fmt::format("'{}' is the function's own name, which holds its result", variable.name));
+            } else if (upper(variable.name).rfind(upper(kGeneratedPrefix), 0) == 0) {
+                add(block.name, fmt::format("'{}': names starting with {} are kept for the code generated from KOP",
+                                            variable.name, kGeneratedPrefix));
             }
             if (variable.type.empty()) {
                 add(block.name, fmt::format("'{}' has no type", variable.name));

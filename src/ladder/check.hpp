@@ -1,4 +1,5 @@
 #pragma once
+#include "ladder/boxes.hpp"
 #include "ladder/rung.hpp"
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@ struct Problem {
 };
 
 // Every problem in the rung, in order from left to right; empty if it's fine.
-std::vector<Problem> check(const Rung& rung);
+// `boxes` are the box types the rung may use (the project's function blocks too).
+std::vector<Problem> check(const Rung& rung, const BoxCatalog& boxes = standardBoxes());
 
 } // namespace ladder

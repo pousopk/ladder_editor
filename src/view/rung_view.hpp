@@ -1,4 +1,5 @@
 #pragma once
+#include "ladder/boxes.hpp"
 #include "ladder/layout.hpp"
 #include "ladder/rung.hpp"
 #include <imgui.h>
@@ -27,7 +28,9 @@ ImVec2 itemCenter(const ladder::PlacedItem& item, ImVec2 origin, float zoom);
 
 // Draws `rung` at the current ImGui cursor and moves the cursor below it.
 // `selected` is drawn highlighted. `id` must be unique per rung in the window.
+// `boxes` are the box types the layout was made with.
 RungView drawRung(const ladder::Rung& rung, const ladder::RungLayout& layout, int id,
-                  const std::optional<ladder::ItemPath>& selected, float zoom);
+                  const std::optional<ladder::ItemPath>& selected, float zoom,
+                  const ladder::BoxCatalog& boxes = ladder::standardBoxes());
 
 } // namespace view

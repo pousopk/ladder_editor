@@ -67,6 +67,7 @@ add_library(ladder_core STATIC
   src/ladder/history.cpp
   src/ladder/block.cpp
   src/ladder/project_file.cpp
+  src/ladder/translate.cpp
   src/text/text_document.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
@@ -106,6 +107,7 @@ ladder_editor_mark_system(imgui_core)
 add_library(ladder_ui STATIC
   src/app/kop_editor.cpp
   src/app/project_window.cpp
+  src/app/st_colors.cpp
   src/view/rung_view.cpp
   src/view/code_editor.cpp
 )

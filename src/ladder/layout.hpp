@@ -1,4 +1,5 @@
 #pragma once
+#include "ladder/boxes.hpp"
 #include "ladder/rung.hpp"
 #include <cstddef>
 #include <variant>
@@ -77,9 +78,9 @@ constexpr std::size_t kMinimumCoilColumn = 4; // coils line up at least this far
 
 // How many rows a box needs: one for the power line, then one per pin of the
 // side with the most pins (every pin of the block type is shown, connected or not).
-std::size_t boxHeight(const Box& box);
+std::size_t boxHeight(const Box& box, const BoxCatalog& boxes = standardBoxes());
 
-RungLayout layOut(const Rung& rung);
+RungLayout layOut(const Rung& rung, const BoxCatalog& boxes = standardBoxes());
 
 // The element at a path, or null if the path doesn't lead to one.
 const Element* elementAt(const Rung& rung, const ElementPath& path);

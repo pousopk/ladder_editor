@@ -1,9 +1,10 @@
 #include "app/project_window.hpp"
+#include "app/st_colors.hpp"
 #include "ladder/project_file.hpp"
-#include "st_support/highlight.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fmt/format.h>
+#include <fstream>
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
@@ -19,31 +20,6 @@ const ImVec4 kKop{0.45F, 0.70F, 0.95F, 1.0F};
 const ImVec4 kSt{0.85F, 0.70F, 0.40F, 1.0F};
 
 constexpr float kListWidth = 250.0F;
-
-// The colours of ST's parts in the code editor.
-ImU32 colorOf(st_support::Style style) {
-    switch (style) {
-    case st_support::Style::Keyword:
-        return IM_COL32(110, 160, 240, 255);
-    case st_support::Style::Type:
-        return IM_COL32(90, 200, 190, 255);
-    case st_support::Style::Builtin:
-        return IM_COL32(220, 200, 120, 255);
-    case st_support::Style::Literal:
-        return IM_COL32(200, 140, 230, 255);
-    case st_support::Style::Number:
-        return IM_COL32(180, 220, 150, 255);
-    case st_support::Style::Time:
-        return IM_COL32(180, 220, 150, 255);
-    case st_support::Style::Address:
-        return IM_COL32(240, 160, 110, 255);
-    case st_support::Style::Operator:
-        return IM_COL32(170, 175, 185, 255);
-    case st_support::Style::Comment:
-        return IM_COL32(110, 150, 110, 255);
-    }
-    return IM_COL32_WHITE;
-}
 
 std::unique_ptr<view::CodeEditor> codeEditorFor(const Block& block) {
     return block.language == Language::St ? std::make_unique<view::CodeEditor>(block.source) : nullptr;
@@ -95,8 +71,8 @@ void ProjectWindow::draw() {
     ImGui::Begin("ladder_editor", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     widgets_.clear();
-    if (stChanged_) {
-        checkSt();
+    if (!checked_ || *checked_ != project_) {
+        checkCode(); // something changed since the last check
     }
     drawHeader();
     ImGui::Separator();
@@ -135,10 +111,19 @@ void ProjectWindow::drawHeader() {
         save();
     }
     ImGui::SetItemTooltip("Save every block of the project (Ctrl+S)");
+    ImGui::SameLine();
+    if (ImGui::Button("Export ST")) {
+        exportSt();
+    }
+    ImGui::SetItemTooltip("Write the whole project as one ST file, KOP blocks translated, for soft_plc");
+    widgets_.remember("export st");
     ImGui::EndDisabled();
     if (!status_.empty()) {
         ImGui::SameLine();
         ImGui::TextColored(kProblem, "%s", status_.c_str());
+    } else if (!note_.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(kDim, "%s", note_.c_str());
     }
 }
 
@@ -182,22 +167,26 @@ void ProjectWindow::drawBlockList() {
 
 void ProjectWindow::drawProblems() {
     const auto problems = checkProject(project_);
-    const auto count = problems.size() + (stDiagnostic_ ? 1 : 0);
+    const auto& error = check_.error;
+    const auto count = problems.size() + (error ? 1 : 0);
     if (count == 0) {
         return;
     }
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::TextColored(kProblem, "%zu problem%s", count, count == 1 ? "" : "s");
-    if (stDiagnostic_ && stDiagnostic_->block < project_.blocks.size()) {
-        // soft_plc's first error in the ST blocks; a click opens its block.
-        const auto text = fmt::format("{}, line {}: {}", project_.blocks[stDiagnostic_->block].name,
-                                      stDiagnostic_->line + 1, stDiagnostic_->message);
+    if (error && error->block < project_.blocks.size()) {
+        // soft_plc's first error; a click opens its block.
+        const auto& block = project_.blocks[error->block];
+        const auto where = block.language == Language::St ? fmt::format("line {}", error->line + 1)
+                           : error->network               ? fmt::format("network {}", *error->network + 1)
+                                                          : std::string("interface");
+        const auto text = fmt::format("{}, {}: {}", block.name, where, error->message);
         ImGui::PushTextWrapPos(0.0F);
         ImGui::TextColored(kProblem, "%s", text.c_str());
         ImGui::PopTextWrapPos();
         if (ImGui::IsItemClicked()) {
-            current_ = stDiagnostic_->block;
+            current_ = error->block;
         }
         widgets_.remember("st problem");
     }
@@ -224,7 +213,16 @@ void ProjectWindow::drawCurrentBlock() {
     ImGui::PushID(editors_[current_] ? static_cast<const void*>(editors_[current_].get())
                                      : static_cast<const void*>(codeEditors_[current_].get()));
     if (auto* editor = editors_[current_].get()) {
-        editor->draw(block);
+        app::KopContext context;
+        context.boxes = &check_.boxes;
+        const auto& parts = check_.translation.parts;
+        if (current_ < parts.size() && parts[current_].block == current_) {
+            context.translation = &parts[current_].translation;
+        }
+        if (check_.error && check_.error->block == current_) {
+            context.error = check_.error;
+        }
+        editor->draw(block, context);
     } else {
         drawStBlock(current_);
     }
@@ -235,38 +233,48 @@ void ProjectWindow::drawStBlock(std::size_t index) {
     auto& block = project_.blocks[index];
     auto& editor = *codeEditors_[index];
     if (coloredVersion_[index] != editor.document().version()) {
-        std::vector<view::ColoredSpan> colors;
-        for (const auto& span : st_support::highlight(editor.document().text())) {
-            colors.push_back(view::ColoredSpan{span.line, span.column, span.length, colorOf(span.style)});
-        }
-        editor.setColors(std::move(colors));
+        editor.setColors(stColors(editor.document().text()));
         coloredVersion_[index] = editor.document().version();
     }
-    const auto errorIn = [&](std::size_t i) { return stDiagnostic_ && stDiagnostic_->block == i; };
-    editor.setError(errorIn(index) ? std::optional(view::ErrorMark{stDiagnostic_->line, stDiagnostic_->column,
-                                                                   stDiagnostic_->message})
-                                   : std::nullopt);
+    const auto errorIn = [&](std::size_t i) { return check_.error && check_.error->block == i; };
+    editor.setError(
+        errorIn(index) ? std::optional(view::ErrorMark{check_.error->line, check_.error->column, check_.error->message})
+                       : std::nullopt);
 
     const float messageHeight = ImGui::GetTextLineHeightWithSpacing() + 4.0F;
     if (editor.draw("##source", ImVec2(-1.0F, -messageHeight))) {
         block.source = editor.document().text();
-        checkSt(); // right away: the error follows each keystroke (and may be gone now)
+        checkCode(); // right away: the error follows each keystroke (and may be gone now)
     }
     widgets_.remember("source");
     if (errorIn(index)) {
-        ImGui::TextColored(kProblem, "line %zu, column %zu: %s", stDiagnostic_->line + 1, stDiagnostic_->column + 1,
-                           stDiagnostic_->message.c_str());
-    } else if (stDiagnostic_) {
+        ImGui::TextColored(kProblem, "line %zu, column %zu: %s", check_.error->line + 1, check_.error->column + 1,
+                           check_.error->message.c_str());
+    } else if (check_.error) {
         ImGui::TextColored(kDim, "No errors here. soft_plc's first error is in block %s.",
-                           project_.blocks[stDiagnostic_->block].name.c_str());
+                           project_.blocks[check_.error->block].name.c_str());
     } else {
-        ImGui::TextColored(kDim, "No errors: soft_plc compiles the project's ST blocks.");
+        ImGui::TextColored(kDim, "No errors: soft_plc compiles the whole project.");
     }
 }
 
-void ProjectWindow::checkSt() {
-    stDiagnostic_ = st_support::checkStBlocks(project_);
-    stChanged_ = false;
+void ProjectWindow::checkCode() {
+    check_ = st_support::checkCode(project_);
+    checked_ = project_;
+}
+
+void ProjectWindow::exportSt() {
+    const auto path = folder_ / (project_.name + ".st");
+    std::ofstream file(path, std::ios::binary);
+    file << check_.translation.text;
+    file.close();
+    if (!file) {
+        status_ = fmt::format("Couldn't write {}", path.string());
+        return;
+    }
+    status_.clear();
+    note_ = fmt::format("Exported {}{}", path.filename().string(),
+                        check_.error ? ", but soft_plc reports an error in it" : "");
 }
 
 // ---------------------------------------------------------------- Popups
@@ -345,7 +353,6 @@ void ProjectWindow::drawRenamePopup() {
         if (block.name != newName_) {
             block.name = newName_;
             structureModified_ = true;
-            stChanged_ = true;
         }
         ImGui::CloseCurrentPopup();
     }
@@ -432,7 +439,6 @@ void ProjectWindow::addBlock(Block block) {
     editors_.push_back(block.language == Language::Kop ? std::make_unique<KopEditor>() : nullptr);
     codeEditors_.push_back(codeEditorFor(block));
     coloredVersion_.push_back(static_cast<std::size_t>(-1));
-    stChanged_ = true;
     savedSources_.emplace_back(); // never saved: any text counts as a change
     project_.blocks.push_back(std::move(block));
     current_ = project_.blocks.size() - 1;
@@ -447,7 +453,6 @@ void ProjectWindow::deleteBlock(std::size_t index) {
     editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(index));
     codeEditors_.erase(codeEditors_.begin() + static_cast<std::ptrdiff_t>(index));
     coloredVersion_.erase(coloredVersion_.begin() + static_cast<std::ptrdiff_t>(index));
-    stChanged_ = true;
     savedSources_.erase(savedSources_.begin() + static_cast<std::ptrdiff_t>(index));
     current_ = project_.blocks.empty() ? 0 : std::min(index, project_.blocks.size() - 1);
     structureModified_ = true;

@@ -1,6 +1,8 @@
 #include "harness.hpp"
+#include "ladder/notation.hpp"
 #include "ladder/project_file.hpp"
 #include <filesystem>
+#include <fstream>
 
 // The project window: blocks, the interface table, ST blocks, saving and quitting.
 
@@ -150,7 +152,7 @@ TEST_CASE("Typing in the code editor: Enter keeps the indentation") {
     CHECK(mixer(ui).source ==
           "FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nVAR_OUTPUT on : BOOL; END_VAR\n    on := run;\n"
           "    IF NOT run THEN on := FALSE; END_IF;\nEND_FUNCTION_BLOCK");
-    CHECK_FALSE(ui.window().stDiagnostic().has_value());
+    CHECK_FALSE(ui.window().codeError().has_value());
 }
 
 TEST_CASE("An error shows up while typing, with soft_plc's message, and goes away with undo") {
@@ -162,7 +164,7 @@ TEST_CASE("An error shows up while typing, with soft_plc's message, and goes awa
     ui.key(ImGuiKey_End);
     ui.key(ImGuiKey_Enter);
     ui.type("run := 5;");
-    const auto& diagnostic = ui.window().stDiagnostic();
+    const auto& diagnostic = ui.window().codeError();
     REQUIRE(diagnostic.has_value());
     CHECK(diagnostic->block == 1);
     CHECK(diagnostic->line == 2);
@@ -172,7 +174,7 @@ TEST_CASE("An error shows up while typing, with soft_plc's message, and goes awa
     ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl); // the typing, as one step
     ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl); // the new line
     CHECK(mixer(ui).source == "FUNCTION_BLOCK Mixer\nVAR_INPUT run : BOOL; END_VAR\nEND_FUNCTION_BLOCK");
-    CHECK_FALSE(ui.window().stDiagnostic().has_value());
+    CHECK_FALSE(ui.window().codeError().has_value());
 }
 
 TEST_CASE("Select all, copy and paste in the code editor") {
@@ -186,15 +188,59 @@ TEST_CASE("Select all, copy and paste in the code editor") {
     ui.key(ImGuiKey_V, ImGuiKey_LeftCtrl);
     CHECK(mixer(ui).source == "FUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK\nFUNCTION_BLOCK Mixer\nEND_FUNCTION_BLOCK");
     // Two function blocks in one block: the editor says so.
-    REQUIRE(ui.window().stDiagnostic().has_value());
-    CHECK(ui.window().stDiagnostic()->message ==
+    REQUIRE(ui.window().codeError().has_value());
+    CHECK(ui.window().codeError()->message ==
           "a block holds just its own FUNCTION_BLOCK: put this FUNCTION_BLOCK in a block of its own");
 }
 
 TEST_CASE("Clicking the ST problem opens its block") {
     Ui ui(withSt("FUNCTION_BLOCK Blender\nEND_FUNCTION_BLOCK"), ""); // the block is called Mixer
-    REQUIRE(ui.window().stDiagnostic().has_value());
+    REQUIRE(ui.window().codeError().has_value());
     CHECK(ui.window().currentBlock() == 0);
     ui.clickWidget("st problem");
     CHECK(ui.window().currentBlock() == 1);
+}
+
+TEST_CASE("The ST panel shows the KOP block as soft_plc compiles it; errors show under their network") {
+    auto project = twoBlocks();
+    auto& main = project.blocks[0];
+    main.variables = {Variable{"a", "BOOL", Section::Local, "", "", ""}};
+    main.networks = {*parseRung("a => a"), *parseRung("a => missing")};
+    Ui ui(project, "");
+
+    const auto& error = ui.window().codeError();
+    REQUIRE(error.has_value());
+    CHECK(error->block == 0);
+    CHECK(error->network == 1u);
+    CHECK(ui.editor().widgets().center("error 1").has_value()); // shown under network 2
+
+    CHECK_FALSE(ui.editor().showingSt());
+    ui.clickWidget("show st");
+    CHECK(ui.editor().showingSt());
+    ui.frame();
+    const auto text = ui.editor().stView().document().text();
+    CHECK(text.find("    a := a;\n") != std::string::npos);
+    CHECK(text.find("    missing := a;\n") != std::string::npos);
+
+    ui.click(1, CoilPath{0}, 2); // fix the coil: double-click it and type a declared name
+    ui.key(ImGuiKey_A, ImGuiKey_LeftCtrl);
+    ui.type("a");
+    ui.key(ImGuiKey_Enter);
+    ui.frame();
+    CHECK_FALSE(ui.window().codeError().has_value());
+    CHECK(ui.editor().stView().document().text().find("missing") == std::string::npos);
+}
+
+TEST_CASE("Export ST writes the whole project as one file") {
+    const auto folder = freshFolder("export");
+    auto project = twoBlocks();
+    REQUIRE(saveProject(project, folder).has_value());
+    Ui ui(project, folder);
+    ui.clickWidget("export st");
+    std::ifstream file(folder / "test.st", std::ios::binary);
+    REQUIRE(file.good());
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    CHECK(text == ui.window().translation().text);
+    CHECK(text.find("PROGRAM Main") != std::string::npos);
+    CHECK(text.find("FUNCTION_BLOCK Mixer") != std::string::npos);
 }
