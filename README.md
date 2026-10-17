@@ -31,6 +31,7 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 8. Run and online mode: start `soft_plc`, show power flow and live values in KOP and ST
 9. Watch table: chosen variables from any block, with live values, Set and Force
 10. Clearer online drawing: dashed wires without power, pin values that are never cut off
+11. Online change: Download loads changes into the running PLC without losing its values
 
 ## Building
 
@@ -58,7 +59,7 @@ The window shows the blocks on the left (New block, Rename, Delete) and the open
 
 **Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (**Export ST**, then `soft_plc --monitor=5020 <project>.st`). Online, the rungs show power flow as in TIA Portal: solid green where power flows, dashed blue where it doesn't, closed contacts green and open ones blue. Box pins show their values under their operands, and hovering a box lists all its pins, uncut; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
 
-To change a value: double-click a contact or coil to flip its operand, or select it and use **Set TRUE/FALSE** (written once) or **Force TRUE/FALSE** (held every cycle, until **Unforce**). In the simulator, inputs keep what you set; a real soft_plc reads its inputs every cycle, so there inputs must be forced. When the project changes, **Download** restarts the simulator with it.
+To change a value: double-click a contact or coil to flip its operand, or select it and use **Set TRUE/FALSE** (written once) or **Force TRUE/FALSE** (held every cycle, until **Unforce**). In the simulator, inputs keep what you set; a real soft_plc reads its inputs every cycle, so there inputs must be forced. When the project changes, **Download** loads it into the running PLC between two cycles, like a download in RUN in TIA Portal: every variable that's still there keeps its value (a running timer goes on timing, a counter keeps its count), and the header lists the ones that start at their initial value (new, or with a changed type). It works with a standalone soft_plc too. **Restart** (simulator only) starts over with every value reset.
 
 The **Watch table**, under the blocks, lists variables from any block (`start`, `t1.ET`, `p1.demand`) with their type and live value, and a modify value for each: **Set** writes it once, **Force** holds it every cycle, **Set all** writes every line in order. It's saved with the project; the conveyor example's table releases the two normally closed buttons and presses start.
 

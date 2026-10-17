@@ -111,6 +111,25 @@ bool Session::variablesKnown() const {
     return variables_.has_value();
 }
 
+void Session::load(std::string_view source) {
+    std::string command = "LOAD ";
+    for (const char c : source) { // one line: \n for line ends, \\ for backslashes
+        if (c == '\n') {
+            command += "\\n";
+        } else if (c == '\\') {
+            command += "\\\\";
+        } else if (c != '\r') {
+            command += c;
+        }
+    }
+    send(std::move(command));
+}
+
+std::optional<Session::LoadResult> Session::lastLoad() const {
+    std::lock_guard lock(mutex_);
+    return lastLoad_;
+}
+
 PlcStatus Session::status() const {
     std::lock_guard lock(mutex_);
     return status_;
@@ -174,6 +193,27 @@ bool Session::exchange() {
         auto reply = client.request(command);
         if (!reply) {
             return lost(reply.error());
+        }
+        if (command.rfind("LOAD ", 0) == 0) {
+            // OK kept=25 initialized=2 boxes newFlag
+            LoadResult result;
+            result.ok = ok(*reply);
+            result.message = *reply;
+            if (result.ok) {
+                const auto parts = words(*reply);
+                for (std::size_t i = 1; i < parts.size(); ++i) {
+                    if (parts[i].rfind("kept=", 0) == 0) {
+                        result.kept = std::stoul(parts[i].substr(5));
+                    } else if (parts[i].rfind("initialized=", 0) != 0) {
+                        result.initialized.push_back(parts[i]);
+                    }
+                }
+                listed_ = false; // the program's variables changed: list them again
+            }
+            std::lock_guard lock(mutex_);
+            result.number = lastLoad_ ? lastLoad_->number + 1 : 1;
+            lastLoad_ = std::move(result);
+            continue;
         }
         if (!ok(*reply)) {
             refused = command + ": " + *reply;

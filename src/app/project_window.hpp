@@ -57,6 +57,13 @@ public:
     // message) if it can't: the project has errors, nothing listens on the port.
     bool simulate();
     bool connect(std::uint16_t port);
+    // Online change: loads the project as it is now into the running PLC,
+    // which keeps the values of the variables still there. The answer comes
+    // a moment later (the header shows it).
+    bool download();
+    bool downloadPending() const { return pendingDownload_.has_value(); }
+    const std::string& note() const { return note_; }
+    const std::string& status() const { return status_; }
     void goOffline();
     online::Session* session() { return session_.get(); }
     // Online: the instance the open block is watched from ("" for the
@@ -79,6 +86,7 @@ private:
     void checkCode();
     void drawOnline();
     void updateWatch(const std::vector<std::string>& paths);
+    void checkDownload();
     // Online: the instance a FUNCTION_BLOCK is shown from, chosen in a combo.
     // Nothing when the block can't be watched (a FUNCTION, an unused FB).
     std::optional<std::string> chooseInstance(const ladder::Block& block);
@@ -105,11 +113,13 @@ private:
         savedWatch_; // the watch table as saved         // blocks added, deleted or renamed since saving
     std::size_t current_ = 0;
     // Online mode.
-    std::unique_ptr<online::Simulator> simulator_; // the PLC inside the editor, when simulating
-    std::unique_ptr<online::Session> session_;     // the connection to the PLC; null when offline
-    std::optional<ladder::Project> downloaded_;    // the project as the simulator runs it
-    std::vector<std::string> watching_;            // what the session reads
-    std::map<std::string, std::string> instances_; // per FUNCTION_BLOCK: the instance shown
+    std::unique_ptr<online::Simulator> simulator_;   // the PLC inside the editor, when simulating
+    std::unique_ptr<online::Session> session_;       // the connection to the PLC; null when offline
+    std::optional<ladder::Project> downloaded_;      // the project as the PLC runs it, if this editor loaded it
+    std::optional<ladder::Project> pendingDownload_; // sent, waiting for soft_plc's answer
+    std::uint64_t loadsSeen_ = 0;                    // the session's loads already handled
+    std::vector<std::string> watching_;              // what the session reads
+    std::map<std::string, std::string> instances_;   // per FUNCTION_BLOCK: the instance shown
     std::optional<std::string> instance_;
     int port_ = 5020;
 

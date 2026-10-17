@@ -138,3 +138,28 @@ TEST_CASE("The session knows the PLC's variables and their types") {
     CHECK(online.session->describe("t1.ET")->type == "TIME");
     CHECK_FALSE(online.session->describe("nothing").has_value());
 }
+
+TEST_CASE("Online change through the session: values are kept, new variables listed") {
+    Online online(kProgram);
+    online.session->watch({"count"});
+    REQUIRE(eventually([&] { return online.session->value("count").has_value(); }));
+    REQUIRE(eventually([&] { return std::stoi(*online.session->value("count")) > 20; }));
+
+    std::string changed = kProgram;
+    changed.replace(changed.find("    t1 : TON;\n"), 14, "    t1 : TON;\n    added : INT := 7;\n");
+    online.session->load(changed);
+    REQUIRE(eventually([&] { return online.session->lastLoad().has_value(); }));
+    const auto result = *online.session->lastLoad();
+    CHECK(result.ok);
+    CHECK(result.number == 1);
+    CHECK(result.initialized == std::vector<std::string>{"added"});
+    CHECK(result.kept > 0);
+    CHECK(std::stoi(*online.session->value("count")) > 20);                           // not back to 0
+    CHECK(eventually([&] { return online.session->describe("added").has_value(); })); // listed again
+
+    online.session->load("PROGRAM Main\n    nothing := 1;\nEND_PROGRAM\n");
+    REQUIRE(eventually([&] { return online.session->lastLoad()->number == 2; }));
+    CHECK_FALSE(online.session->lastLoad()->ok);
+    CHECK(online.session->lastLoad()->message.find("nothing") != std::string::npos);
+    CHECK(online.session->status().running); // the old program goes on
+}

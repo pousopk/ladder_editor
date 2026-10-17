@@ -14,3 +14,4 @@ What each milestone teaches, about PLC programming and about C++, with pointers 
 | 8. Online mode | [08-online-mode.md](08-online-mode.md) |
 | 9. The watch table | [09-watch-table.md](09-watch-table.md) |
 | 10. Clearer online drawing | [10-online-drawing.md](10-online-drawing.md) |
+| 11. Online change | [11-online-change.md](11-online-change.md) |

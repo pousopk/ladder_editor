@@ -52,17 +52,50 @@ TEST_CASE("Simulate: the rungs show the PLC's values; a double-click flips an in
     CHECK(ui.window().session() == nullptr);
 }
 
-TEST_CASE("After a change, Download restarts the simulator with it") {
-    Ui ui(startStop(), "");
+TEST_CASE("Download loads a change into the running PLC and keeps its values; Restart starts over") {
+    // A counter that counts every other cycle.
+    Project project;
+    project.name = "counting";
+    auto main = newBlock("Main", BlockKind::Program, Language::Kop);
+    main.variables = {var("pulse", "BOOL"), var("c", "CTU"), var("count", "INT"), var("full", "BOOL")};
+    main.networks = {*parseRung("/pulse => pulse"), *parseRung("pulse {CTU c, PV := 30000, CV => count} => full")};
+    project.blocks.push_back(main);
+    Ui ui(project, "");
     REQUIRE(ui.window().simulate());
-    ui.frame();
-    CHECK_FALSE(ui.window().widgets().center("download").has_value());
-    ui.key(ImGuiKey_N, ImGuiKey_LeftCtrl); // a new network: the PLC now runs an older version
-    ui.key(ImGuiKey_Escape);               // (closes the new network's edit popup)
+    auto* session = ui.window().session();
+    session->watch({"count"});
+    REQUIRE(ui.waitFor([&] { return session->value("count") && std::stoi(*session->value("count")) > 20; }));
+    CHECK_FALSE(ui.window().widgets().center("download").has_value()); // nothing changed yet
+
+    ui.clickWidget("+ variable"); // a change: the PLC now runs an older version
     REQUIRE(ui.window().widgets().center("download").has_value());
     ui.clickWidget("download");
+    REQUIRE(ui.waitFor([&] { return !ui.window().downloadPending(); }));
+    CHECK(ui.window().note().find("these start at their initial value: var1") != std::string::npos);
     CHECK_FALSE(ui.window().widgets().center("download").has_value());
-    CHECK(ui.window().session() != nullptr);
+    const auto counted = [&] { return std::stoi(session->value("count").value_or("0")); };
+    CHECK(ui.waitFor([&] { return counted() > 20; })); // still counting from where it was
+    CHECK(session == ui.window().session());           // the same PLC: no restart
+
+    ui.clickWidget("restart"); // a cold restart: a new simulator, every value from the start
+    auto* restarted = ui.window().session();
+    REQUIRE(restarted != nullptr);
+    restarted->watch({"count"});
+    REQUIRE(ui.waitFor([&] { return restarted->value("count").has_value(); }));
+    CHECK(std::stoi(*restarted->value("count")) < 20);
+}
+
+TEST_CASE("Download refuses a project with errors") {
+    Ui ui(startStop(), "");
+    REQUIRE(ui.window().simulate());
+    ui.clickWidget("block 0");
+    ui.key(ImGuiKey_N, ImGuiKey_LeftCtrl);
+    ui.type("missing"); // the new network's coil: an undeclared variable
+    ui.key(ImGuiKey_Enter);
+    ui.frame();
+    REQUIRE(ui.window().codeError().has_value());
+    CHECK_FALSE(ui.window().download());
+    CHECK(ui.window().status().find("fix the errors first") != std::string::npos);
 }
 
 TEST_CASE("A project with errors can't be simulated") {

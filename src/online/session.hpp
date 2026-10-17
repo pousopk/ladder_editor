@@ -68,6 +68,19 @@ public:
     std::optional<Variable> describe(std::string_view path) const;
     bool variablesKnown() const;
 
+    // Online change: sends a new version of the program, which soft_plc runs
+    // from its next cycle on, keeping the values of the variables the two
+    // versions share. The answer comes later, in lastLoad().
+    void load(std::string_view source);
+    struct LoadResult {
+        std::uint64_t number = 0; // 1 for the first load, 2 for the next, ...
+        bool ok = false;
+        std::string message; // soft_plc's reply, or why it refused
+        std::size_t kept = 0;
+        std::vector<std::string> initialized; // what starts at its initial value
+    };
+    std::optional<LoadResult> lastLoad() const;
+
     PlcStatus status() const;
     // The forced variables and their values, as soft_plc reports them.
     std::map<std::string, std::string> forces() const;
@@ -90,6 +103,7 @@ private:
     std::map<std::string, std::string> values_; // by path in upper case
     std::map<std::string, std::string> forces_;
     std::optional<std::map<std::string, Variable>> variables_; // by path in upper case, once listed
+    std::optional<LoadResult> lastLoad_;
     PlcStatus status_;
 
     std::thread thread_; // last: started once everything else exists

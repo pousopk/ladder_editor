@@ -344,16 +344,30 @@ void ProjectWindow::drawOnline() {
         return;
     }
     widgets_.remember("go offline");
-    if (simulator_ && downloaded_ && *downloaded_ != project_) {
+    checkDownload();
+    if (status.connected && (!downloaded_ || *downloaded_ != project_)) {
         ImGui::SameLine();
-        ImGui::TextColored(kStop, "The PLC runs an older version.");
+        ImGui::TextColored(kStop, "%s",
+                           downloaded_ ? "The PLC runs an older version."
+                                       : "The PLC runs a version this editor didn't load.");
         ImGui::SameLine();
+        ImGui::BeginDisabled(pendingDownload_.has_value());
         if (ImGui::Button("Download")) {
+            download();
+        }
+        ImGui::SetItemTooltip("Load the project as it is now into the running PLC, between two cycles. Variables "
+                              "that are still there keep their values; new ones start at their initial value.");
+        widgets_.remember("download");
+        ImGui::EndDisabled();
+    }
+    if (simulator_) {
+        ImGui::SameLine();
+        if (ImGui::Button("Restart")) {
             simulate();
             return;
         }
-        ImGui::SetItemTooltip("Restart the simulator with the project as it is now (its values start over)");
-        widgets_.remember("download");
+        ImGui::SetItemTooltip("Restart the simulator with the project as it is now: every value starts over");
+        widgets_.remember("restart");
     }
     ImGui::SameLine();
     ImGui::TextColored(kDim, "%s", status.details.c_str());
@@ -402,10 +416,53 @@ bool ProjectWindow::connect(std::uint16_t port) {
     return true;
 }
 
+bool ProjectWindow::download() {
+    if (!session_) {
+        return false;
+    }
+    if (!checked_ || *checked_ != project_) {
+        checkCode();
+    }
+    if (check_.error) {
+        status_ = "soft_plc can't compile the project yet: fix the errors first.";
+        return false;
+    }
+    session_->load(check_.translation.text);
+    pendingDownload_ = project_;
+    return true;
+}
+
+// A download's answer, once it's there.
+void ProjectWindow::checkDownload() {
+    if (!pendingDownload_ || !session_) {
+        return;
+    }
+    const auto result = session_->lastLoad();
+    if (!result || result->number <= loadsSeen_) {
+        return;
+    }
+    loadsSeen_ = result->number;
+    if (result->ok) {
+        downloaded_ = std::move(*pendingDownload_);
+        status_.clear();
+        std::string startOver;
+        for (const auto& path : result->initialized) {
+            startOver += (startOver.empty() ? "" : ", ") + path;
+        }
+        note_ = fmt::format("Downloaded: {} variables kept their values{}", result->kept,
+                            startOver.empty() ? "." : "; these start at their initial value: " + startOver);
+    } else {
+        status_ = "Download refused: " + result->message;
+    }
+    pendingDownload_.reset();
+}
+
 void ProjectWindow::goOffline() {
     session_.reset();
     simulator_.reset();
     downloaded_.reset();
+    pendingDownload_.reset();
+    loadsSeen_ = 0;
     watching_.clear();
 }
 
