@@ -13,6 +13,7 @@
 //   (a b | c)       a parallel branch: "a then b", or "c"
 //   {TON t1, ...}   a box: type, instance, then inputs (PIN := value) and outputs (PIN => variable)
 //   => lamp, ...    the coils: lamp (normal), /lamp (negated), S:lamp (set), R:lamp (reset)
+//   ?               an operand not filled in yet: "=> ?", "/?", "{TON ?}"
 //
 // Elements in a series are separated by spaces. A rung with no logic is
 // written "=> lamp". formatRung(parseRung(text)) gives back the text in

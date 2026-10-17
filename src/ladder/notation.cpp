@@ -5,6 +5,20 @@
 
 namespace ladder {
 
+namespace {
+
+// "Not filled in yet": an empty operand is written as a lone ?, and read back as empty.
+constexpr const char* kMissing = "?";
+
+std::string shown(const std::string& operand) {
+    return operand.empty() ? kMissing : operand;
+}
+std::string read(std::string word) {
+    return word == kMissing ? std::string() : word;
+}
+
+} // namespace
+
 // ---------------------------------------------------------------- Formatting
 
 namespace {
@@ -15,10 +29,10 @@ std::string formatSeries(const Series& series);
 
 std::string formatElement(const Element& element) {
     if (const auto* contact = std::get_if<Contact>(&element)) {
-        return (contact->kind == ContactKind::NormallyClosed ? "/" : "") + contact->operand;
+        return (contact->kind == ContactKind::NormallyClosed ? "/" : "") + shown(contact->operand);
     }
     if (const auto* box = std::get_if<Box>(&element)) {
-        std::string text = "{" + box->type + " " + box->instance;
+        std::string text = "{" + box->type + " " + shown(box->instance);
         for (const auto& pin : box->inputs) {
             text += ", " + pin.name + " := " + pin.operand;
         }
@@ -51,15 +65,15 @@ std::string formatSeries(const Series& series) {
 std::string formatCoil(const Coil& coil) {
     switch (coil.kind) {
     case CoilKind::Normal:
-        return coil.operand;
+        return shown(coil.operand);
     case CoilKind::Negated:
-        return "/" + coil.operand;
+        return "/" + shown(coil.operand);
     case CoilKind::Set:
-        return "S:" + coil.operand;
+        return "S:" + shown(coil.operand);
     case CoilKind::Reset:
-        return "R:" + coil.operand;
+        return "R:" + shown(coil.operand);
     }
-    return coil.operand;
+    return shown(coil.operand);
 }
 
 } // namespace
@@ -204,7 +218,7 @@ private:
         if (word.empty()) {
             fail("expected an operand after '/'", -1);
         }
-        result.operand = std::move(word);
+        result.operand = read(std::move(word));
         return result;
     }
 
@@ -222,7 +236,7 @@ private:
         advance(); // '{'
         Box result;
         result.type = expectWord("the box type, as in {TON t1}");
-        result.instance = expectWord("the instance name after the box type, as in {TON t1}");
+        result.instance = read(expectWord("the instance name after the box type, as in {TON t1}"));
         while (match(TokenKind::Comma)) {
             Pin pin;
             pin.name = expectWord("a pin name, as in PT := T#5s");
@@ -253,7 +267,7 @@ private:
         if (word.empty()) {
             fail("expected an operand for the coil", -1);
         }
-        result.operand = std::move(word);
+        result.operand = read(std::move(word));
         return result;
     }
 

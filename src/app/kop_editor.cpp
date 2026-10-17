@@ -1,13 +1,11 @@
-#include "app/editor_window.hpp"
+#include "app/kop_editor.hpp"
 #include "ladder/boxes.hpp"
 #include "ladder/check.hpp"
 #include "ladder/notation.hpp"
-#include "ladder/rung_file.hpp"
 #include "view/rung_view.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fmt/format.h>
-#include <fstream>
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
@@ -71,17 +69,29 @@ std::string kindOf(const Element& element) {
     return "branch";
 }
 
+using ItemResult = tl::expected<std::optional<ItemPath>, std::string>;
+
+// Turns an edit operation's result (an element or coil path, or an error)
+// into what editRung expects.
+template <class Path> ItemResult toItem(const tl::expected<Path, std::string>& result) {
+    if (!result) {
+        return tl::unexpected(result.error());
+    }
+    return std::optional<ItemPath>(*result);
+}
+
+template <class Path> ItemResult toItem(const tl::expected<std::optional<Path>, std::string>& result) {
+    if (!result) {
+        return tl::unexpected(result.error());
+    }
+    return *result ? std::optional<ItemPath>(**result) : std::nullopt;
+}
+
 } // namespace
 
-EditorWindow::EditorWindow(std::string path, std::vector<Rung> rungs)
-    : path_(std::move(path)), rungs_(std::move(rungs)) {}
-
-void EditorWindow::draw() {
-    const auto* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::Begin("ladder_editor", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+void KopEditor::draw(Block& block) {
+    block_ = &block;
+    widgets_.clear();
     // A popup closed by a click elsewhere is already closed when the frame
     // starts: record its edit before that click does anything else.
     if (pending_ && !ImGui::IsPopupOpen(kEditPopup)) {
@@ -92,6 +102,7 @@ void EditorWindow::draw() {
     const float detailsHeight = ImGui::GetTextLineHeightWithSpacing() * 7.0F;
     ImGui::BeginChild("networks", ImVec2(0, -detailsHeight), ImGuiChildFlags_None,
                       ImGuiWindowFlags_HorizontalScrollbar);
+    drawInterface();
     drawNetworks();
     ImGui::EndChild();
     ImGui::Separator();
@@ -99,22 +110,9 @@ void EditorWindow::draw() {
     handleShortcuts(); // before the popups: the Enter that closes one mustn't open it again
     drawEditPopup();
     drawBoxPopup();
-    ImGui::End();
 }
 
-void EditorWindow::drawToolbar() {
-    ImGui::TextUnformatted(path_.empty() ? "built-in example (not saved)" : path_.c_str());
-    if (modified()) {
-        ImGui::SameLine(0, 2);
-        ImGui::TextUnformatted("*");
-    }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(path_.empty());
-    if (ImGui::Button("Save")) {
-        save();
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
+void KopEditor::drawToolbar() {
     ImGui::BeginDisabled(!history_.canUndo());
     if (ImGui::Button("Undo")) {
         undo();
@@ -168,17 +166,153 @@ void EditorWindow::drawToolbar() {
     ImGui::NewLine();
 }
 
-void EditorWindow::drawNetworks() {
+// ---------------------------------------------------------------- Interface
+
+void KopEditor::drawInterface() {
+    auto& block = *block_;
+    if (!ImGui::CollapsingHeader(fmt::format("Interface ({} variables)###interface", block.variables.size()).c_str(),
+                                 ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+    // Cells are edited in place; a cell's whole edit is one step, recorded
+    // when the cell is left.
+    const auto track = [&](const Interface& before) {
+        if (ImGui::IsItemActivated()) {
+            cellEdit_ = before;
+        }
+        if (ImGui::IsItemDeactivated() && cellEdit_) {
+            if (interfaceOf(block) != *cellEdit_) {
+                auto command = std::make_unique<ReplaceInterface>(*cellEdit_, interfaceOf(block), "edit interface");
+                command->selectionBefore = selection_;
+                command->selectionAfter = selection_;
+                history_.record(std::move(command));
+            }
+            cellEdit_.reset();
+        }
+    };
+
+    if (block.kind == BlockKind::Function) {
+        const auto before = interfaceOf(block);
+        ImGui::SetNextItemWidth(200.0F);
+        ImGui::InputTextWithHint("Returns", "the type the function gives back", &block.returnType);
+        track(before);
+    }
+    const auto sections = sectionsFor(block.kind);
+    std::optional<std::size_t> deleteRequest;
+    std::optional<std::pair<std::size_t, Section>> sectionRequest;
+    const auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp;
+    if (!block.variables.empty() && ImGui::BeginTable("variables", 7, flags)) {
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 1.2F);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 1.2F);
+        ImGui::TableSetupColumn("Section", ImGuiTableColumnFlags_WidthStretch, 1.0F);
+        ImGui::TableSetupColumn("Initial", ImGuiTableColumnFlags_WidthStretch, 0.8F);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.8F);
+        ImGui::TableSetupColumn("Comment", ImGuiTableColumnFlags_WidthStretch, 2.0F);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 24.0F);
+        ImGui::TableHeadersRow();
+        for (std::size_t i = 0; i < block.variables.size(); ++i) {
+            auto& variable = block.variables[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+            const auto before = interfaceOf(block);
+            const auto cell = [&](const char* id, std::string& text, const char* hint) {
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-1.0F);
+                ImGui::InputTextWithHint(id, hint, &text);
+                widgets_.remember(fmt::format("{} {}", id + 2, i)); // "name 0", "type 0", ...
+                track(before);
+            };
+            cell("##name", variable.name, "name");
+            cell("##type", variable.type, "BOOL, INT, TON, ...");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::BeginCombo("##section", sectionName(variable.section))) {
+                for (const auto section : sections) {
+                    if (ImGui::Selectable(sectionName(section), section == variable.section)) {
+                        sectionRequest = std::pair{i, section};
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            cell("##initial", variable.initial, "default");
+            if (block.kind == BlockKind::Program) {
+                cell("##address", variable.address, "none");
+            } else {
+                ImGui::TableNextColumn();
+                ImGui::TextColored(kDim, "-");
+            }
+            cell("##comment", variable.comment, "");
+            ImGui::TableNextColumn();
+            if (ImGui::SmallButton("x")) {
+                deleteRequest = i;
+            }
+            ImGui::SetItemTooltip("Delete this variable");
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (ImGui::SmallButton("+ Variable")) {
+        addVariable();
+    }
+    widgets_.remember("+ variable");
+    ImGui::Spacing();
+    // Changes to the table itself wait until it's no longer being drawn.
+    if (sectionRequest) {
+        auto after = interfaceOf(block);
+        after.variables[sectionRequest->first].section = sectionRequest->second;
+        changeInterface(std::move(after), "change section");
+    }
+    if (deleteRequest) {
+        deleteVariable(*deleteRequest);
+    }
+}
+
+void KopEditor::changeInterface(Interface after, std::string what) {
+    auto command = std::make_unique<ReplaceInterface>(interfaceOf(*block_), std::move(after), std::move(what));
+    command->selectionBefore = selection_;
+    command->selectionAfter = selection_;
+    history_.perform(std::move(command), *block_);
+}
+
+void KopEditor::addVariable() {
+    auto after = interfaceOf(*block_);
+    std::string name;
+    for (int n = 1;; ++n) {
+        name = fmt::format("var{}", n);
+        const bool used = std::any_of(after.variables.begin(), after.variables.end(),
+                                      [&](const Variable& v) { return lower(v.name) == name; });
+        if (!used) {
+            break;
+        }
+    }
+    const auto sections = sectionsFor(block_->kind);
+    after.variables.push_back(Variable{name, "BOOL", sections.empty() ? Section::Local : sections.front(), "", "", ""});
+    changeInterface(std::move(after), "add variable");
+}
+
+void KopEditor::deleteVariable(std::size_t index) {
+    auto after = interfaceOf(*block_);
+    if (index >= after.variables.size()) {
+        return;
+    }
+    after.variables.erase(after.variables.begin() + static_cast<std::ptrdiff_t>(index));
+    changeInterface(std::move(after), "delete variable");
+}
+
+// ---------------------------------------------------------------- Networks
+
+void KopEditor::drawNetworks() {
+    auto& networks = block_->networks;
     // Text scales with the drawing, so labels stay where the symbols are.
     ImGui::SetWindowFontScale(zoom_);
-    origins_.assign(rungs_.size(), ImVec2{-1.0F, -1.0F});
-    if (rungs_.empty()) {
+    origins_.assign(networks.size(), ImVec2{-1.0F, -1.0F});
+    if (networks.empty()) {
         ImGui::TextColored(kDim, "No networks yet: press Ctrl+N or click +Network to add one.");
     }
     std::optional<std::size_t> deleteRequest;
     std::optional<std::pair<std::size_t, int>> moveRequest;
-    for (std::size_t i = 0; i < rungs_.size(); ++i) {
-        const auto& rung = rungs_[i];
+    for (std::size_t i = 0; i < networks.size(); ++i) {
+        const auto& rung = networks[i];
         ImGui::PushID(static_cast<int>(i));
         const bool networkSelected = selection_ && selection_->rung == i;
         if (ImGui::Selectable(fmt::format("Network {}", i + 1).c_str(), networkSelected && !selection_->item,
@@ -232,13 +366,13 @@ void EditorWindow::drawNetworks() {
     }
 }
 
-void EditorWindow::drawDetails() {
-    commentField_.reset();
-    if (!selection_ || selection_->rung >= rungs_.size()) {
+void KopEditor::drawDetails() {
+    auto& networks = block_->networks;
+    if (!selection_ || selection_->rung >= networks.size()) {
         ImGui::TextColored(kDim, "Click an element or a network title to select it. Hover the buttons for shortcuts.");
         return;
     }
-    auto& rung = rungs_[selection_->rung];
+    auto& rung = networks[selection_->rung];
     ImGui::Text("Network %zu", selection_->rung + 1);
     ImGui::SameLine();
     ImGui::TextColored(kDim, "   %s", formatRung(rung).c_str());
@@ -248,15 +382,14 @@ void EditorWindow::drawDetails() {
     ImGui::SetNextItemWidth(-1.0F);
     const auto before = rung;
     ImGui::InputTextWithHint("##comment", "comment: why this network exists", &rung.comment);
-    commentField_ = ImVec2{(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0F,
-                           (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0F};
+    widgets_.remember("comment");
     if (ImGui::IsItemActivated()) {
         commentEdit_ = PendingEdit{selection_->rung, before, selection_, "edit comment", false};
     }
     if (ImGui::IsItemDeactivated() && commentEdit_) {
-        if (rungs_[commentEdit_->rung] != commentEdit_->before) {
+        if (networks[commentEdit_->rung] != commentEdit_->before) {
             auto command = std::make_unique<ReplaceRung>(commentEdit_->rung, commentEdit_->before,
-                                                         rungs_[commentEdit_->rung], commentEdit_->what);
+                                                         networks[commentEdit_->rung], commentEdit_->what);
             command->selectionBefore = commentEdit_->selection;
             command->selectionAfter = commentEdit_->selection;
             history_.record(std::move(command));
@@ -275,7 +408,7 @@ void EditorWindow::drawDetails() {
     }
 }
 
-void EditorWindow::drawEditPopup() {
+void KopEditor::drawEditPopup() {
     if (openEditor_) {
         ImGui::OpenPopup(kEditPopup);
         openEditor_ = false;
@@ -283,12 +416,13 @@ void EditorWindow::drawEditPopup() {
     if (!ImGui::BeginPopup(kEditPopup)) {
         return;
     }
-    if (!selection_ || !selection_->item || selection_->rung >= rungs_.size()) {
+    auto& networks = block_->networks;
+    if (!selection_ || !selection_->item || selection_->rung >= networks.size()) {
         ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
         return;
     }
-    auto& rung = rungs_[selection_->rung];
+    auto& rung = networks[selection_->rung];
     const bool appearing = ImGui::IsWindowAppearing();
     if (appearing) {
         // The popup's edits are made in place; remember the rung as it was,
@@ -368,19 +502,20 @@ void EditorWindow::drawEditPopup() {
     ImGui::EndPopup();
 }
 
-void EditorWindow::finishPendingEdit() {
+void KopEditor::finishPendingEdit() {
     auto edit = std::move(*pending_);
     pending_.reset();
-    if (edit.rung >= rungs_.size() || rungs_[edit.rung] == edit.before) {
+    auto& networks = block_->networks;
+    if (edit.rung >= networks.size() || networks[edit.rung] == edit.before) {
         return; // nothing changed
     }
-    auto command = std::make_unique<ReplaceRung>(edit.rung, edit.before, rungs_[edit.rung], edit.what);
+    auto command = std::make_unique<ReplaceRung>(edit.rung, edit.before, networks[edit.rung], edit.what);
     command->selectionBefore = edit.selection;
     command->selectionAfter = edit.selection;
     history_.record(std::move(command), edit.mergeWithLast);
 }
 
-void EditorWindow::drawBoxPopup() {
+void KopEditor::drawBoxPopup() {
     if (openBoxes_) {
         ImGui::OpenPopup("Insert box");
         openBoxes_ = false;
@@ -414,13 +549,12 @@ void EditorWindow::drawBoxPopup() {
     ImGui::EndPopup();
 }
 
-void EditorWindow::handleShortcuts() {
+void KopEditor::handleShortcuts() {
     const auto& io = ImGui::GetIO();
     if (io.WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
         return; // keys belong to the text field or popup being used
     }
-    const bool ctrl = io.KeyCtrl;
-    if (ctrl) {
+    if (io.KeyCtrl) {
         if (ImGui::IsKeyPressed(ImGuiKey_Z))
             io.KeyShift ? redo() : undo();
         if (ImGui::IsKeyPressed(ImGuiKey_Y))
@@ -431,9 +565,7 @@ void EditorWindow::handleShortcuts() {
             moveSelected(+1);
         if (ImGui::IsKeyPressed(ImGuiKey_N))
             addNetwork();
-        if (ImGui::IsKeyPressed(ImGuiKey_S))
-            save();
-        return;
+        return; // Ctrl+S belongs to the project
     }
     if (ImGui::IsKeyPressed(ImGuiKey_C))
         insertElement(Contact{});
@@ -453,56 +585,35 @@ void EditorWindow::handleShortcuts() {
 
 // ---------------------------------------------------------------- Actions
 
-void EditorWindow::select(std::size_t rung, std::optional<ItemPath> item, bool edit) {
+void KopEditor::select(std::size_t rung, std::optional<ItemPath> item, bool edit) {
     selection_ = Selection{rung, std::move(item)};
     openEditor_ = edit && selection_->item.has_value();
     mergeNextEdit_ = false;
     status_.clear();
 }
 
-template <class Change> void EditorWindow::editRung(std::size_t index, std::string what, Change change, bool edit) {
-    Rung after = rungs_[index];
-    EditResult result = change(after);
+template <class Change> void KopEditor::editRung(std::size_t index, std::string what, Change change, bool edit) {
+    auto& networks = block_->networks;
+    Rung after = networks[index];
+    ItemResult result = change(after);
     if (!result) {
         report(result.error());
         return;
     }
-    auto command = std::make_unique<ReplaceRung>(index, rungs_[index], std::move(after), std::move(what));
+    auto command = std::make_unique<ReplaceRung>(index, networks[index], std::move(after), std::move(what));
     command->selectionBefore = selection_;
     command->selectionAfter = Selection{index, *result};
-    history_.perform(std::move(command), rungs_);
+    history_.perform(std::move(command), *block_);
     select(index, *result, edit);
     mergeNextEdit_ = edit; // the operand typed next belongs to this step
 }
 
-// Turns an edit operation's result (an element or coil path, or an error)
-// into what editRung expects.
-namespace {
-
-using ItemResult = tl::expected<std::optional<ItemPath>, std::string>;
-
-template <class Path> ItemResult toItem(const tl::expected<Path, std::string>& result) {
-    if (!result) {
-        return tl::unexpected(result.error());
-    }
-    return std::optional<ItemPath>(*result);
-}
-
-template <class Path> ItemResult toItem(const tl::expected<std::optional<Path>, std::string>& result) {
-    if (!result) {
-        return tl::unexpected(result.error());
-    }
-    return *result ? std::optional<ItemPath>(**result) : std::nullopt;
-}
-
-} // namespace
-
-void EditorWindow::insertElement(Element element) {
-    if (!selection_) {
+void KopEditor::insertElement(Element element) {
+    if (!selection_ || selection_->rung >= block_->networks.size()) {
         report("Select an element or a network first: new elements go after the selection.");
         return;
     }
-    const auto& rung = rungs_[selection_->rung];
+    const auto& rung = block_->networks[selection_->rung];
     // After the selected element; at the end of the logic for a coil or a whole network.
     InsertPoint point{{}, rung.logic.elements.size()};
     if (selection_->item) {
@@ -516,7 +627,7 @@ void EditorWindow::insertElement(Element element) {
         true);
 }
 
-void EditorWindow::addBranch() {
+void KopEditor::addBranch() {
     const auto* path = selection_ && selection_->item ? std::get_if<ElementPath>(&*selection_->item) : nullptr;
     if (path == nullptr) {
         report("Select a contact or box to put a branch around.");
@@ -526,7 +637,7 @@ void EditorWindow::addBranch() {
     editRung(selection_->rung, "add branch", [&](Rung& r) { return toItem(addParallel(r, target, Contact{})); }, true);
 }
 
-void EditorWindow::addSide() {
+void KopEditor::addSide() {
     const auto* path = selection_ && selection_->item ? std::get_if<ElementPath>(&*selection_->item) : nullptr;
     if (path == nullptr) {
         report("Select an element on a branch to add a side to that branch.");
@@ -537,12 +648,12 @@ void EditorWindow::addSide() {
         selection_->rung, "add side", [&](Rung& r) { return toItem(ladder::addSide(r, target, Contact{})); }, true);
 }
 
-void EditorWindow::addCoil() {
-    if (!selection_) {
+void KopEditor::addCoil() {
+    if (!selection_ || selection_->rung >= block_->networks.size()) {
         report("Select a network first.");
         return;
     }
-    std::size_t index = rungs_[selection_->rung].coils.size();
+    std::size_t index = block_->networks[selection_->rung].coils.size();
     if (selection_->item) {
         if (const auto* coil = std::get_if<CoilPath>(&*selection_->item)) {
             index = coil->index + 1;
@@ -551,8 +662,8 @@ void EditorWindow::addCoil() {
     editRung(selection_->rung, "add coil", [&](Rung& r) { return toItem(insertCoil(r, index, Coil{})); }, true);
 }
 
-void EditorWindow::deleteSelected() {
-    if (!selection_) {
+void KopEditor::deleteSelected() {
+    if (!selection_ || selection_->rung >= block_->networks.size()) {
         return;
     }
     if (!selection_->item) {
@@ -565,12 +676,12 @@ void EditorWindow::deleteSelected() {
         return;
     }
     const auto& path = std::get<ElementPath>(item);
-    const auto* element = elementAt(rungs_[selection_->rung], path);
+    const auto* element = elementAt(block_->networks[selection_->rung], path);
     const auto what = "delete " + (element != nullptr ? kindOf(*element) : std::string("element"));
     editRung(selection_->rung, what, [&](Rung& r) { return toItem(removeElement(r, path)); });
 }
 
-void EditorWindow::moveSelected(int direction) {
+void KopEditor::moveSelected(int direction) {
     const auto* path = selection_ && selection_->item ? std::get_if<ElementPath>(&*selection_->item) : nullptr;
     if (path == nullptr) {
         report("Select an element to move it.");
@@ -580,93 +691,82 @@ void EditorWindow::moveSelected(int direction) {
     editRung(selection_->rung, "move element", [&](Rung& r) { return toItem(moveElement(r, target, direction)); });
 }
 
-void EditorWindow::addNetwork() {
-    const auto index = selection_ ? selection_->rung + 1 : rungs_.size();
+void KopEditor::addNetwork() {
+    const auto index = selection_ ? std::min(selection_->rung + 1, block_->networks.size()) : block_->networks.size();
     Rung rung;
     rung.coils.push_back(Coil{});
     auto command = std::make_unique<InsertNetwork>(index, std::move(rung));
     command->selectionBefore = selection_;
     command->selectionAfter = Selection{index, CoilPath{0}};
-    history_.perform(std::move(command), rungs_);
+    history_.perform(std::move(command), *block_);
     select(index, CoilPath{0}, true);
     mergeNextEdit_ = true; // the coil's operand, typed next, is part of adding the network
 }
 
-void EditorWindow::deleteNetwork(std::size_t index) {
-    if (index >= rungs_.size()) {
+void KopEditor::deleteNetwork(std::size_t index) {
+    auto& networks = block_->networks;
+    if (index >= networks.size()) {
         return;
     }
-    auto command = std::make_unique<RemoveNetwork>(index, rungs_[index]);
+    auto command = std::make_unique<RemoveNetwork>(index, networks[index]);
     command->selectionBefore = Selection{index, std::nullopt};
-    if (rungs_.size() > 1) {
-        command->selectionAfter = Selection{std::min(index, rungs_.size() - 2), std::nullopt};
+    if (networks.size() > 1) {
+        command->selectionAfter = Selection{std::min(index, networks.size() - 2), std::nullopt};
     }
     const auto after = command->selectionAfter;
-    history_.perform(std::move(command), rungs_);
+    history_.perform(std::move(command), *block_);
     selection_ = after;
     status_.clear();
 }
 
-void EditorWindow::moveNetwork(std::size_t index, int direction) {
-    if ((direction < 0 && index == 0) || (direction > 0 && index + 1 >= rungs_.size())) {
+void KopEditor::moveNetwork(std::size_t index, int direction) {
+    if ((direction < 0 && index == 0) || (direction > 0 && index + 1 >= block_->networks.size())) {
         return;
     }
     const auto other = direction < 0 ? index - 1 : index + 1;
     auto command = std::make_unique<SwapNetworks>(index, other);
     command->selectionBefore = Selection{index, std::nullopt};
     command->selectionAfter = Selection{other, std::nullopt};
-    history_.perform(std::move(command), rungs_);
+    history_.perform(std::move(command), *block_);
     select(other, std::nullopt);
 }
 
-void EditorWindow::undo() {
+void KopEditor::undo() {
     if (!history_.canUndo()) {
         return;
     }
-    selection_ = history_.undo(rungs_);
-    if (selection_ && selection_->rung >= rungs_.size()) {
+    selection_ = history_.undo(*block_);
+    if (selection_ && selection_->rung >= block_->networks.size()) {
         selection_.reset();
     }
     status_.clear();
 }
 
-void EditorWindow::redo() {
+void KopEditor::redo() {
     if (!history_.canRedo()) {
         return;
     }
-    selection_ = history_.redo(rungs_);
-    if (selection_ && selection_->rung >= rungs_.size()) {
+    selection_ = history_.redo(*block_);
+    if (selection_ && selection_->rung >= block_->networks.size()) {
         selection_.reset();
     }
     status_.clear();
 }
 
-void EditorWindow::save() {
-    if (path_.empty()) {
-        report("This is the built-in example: start ladder_editor with a file name to save.");
-        return;
-    }
-    std::ofstream file(path_);
-    file << formatRungFile(rungs_);
-    if (!file) {
-        report(fmt::format("Couldn't write {}", path_));
-        return;
-    }
-    history_.markSaved();
-    status_.clear();
-}
-
-std::optional<ImVec2> EditorWindow::rungOrigin(std::size_t index) const {
+std::optional<ImVec2> KopEditor::rungOrigin(std::size_t index) const {
     if (index >= origins_.size() || origins_[index].x < 0.0F) {
         return std::nullopt;
     }
     return origins_[index];
 }
 
-std::string EditorWindow::newInstanceName(std::string_view type) const {
+std::string KopEditor::newInstanceName(std::string_view type) const {
     std::vector<std::string> used;
-    for (const auto& rung : rungs_) {
+    for (const auto& rung : block_->networks) {
         collectInstances(rung.logic, used);
+    }
+    for (const auto& variable : block_->variables) {
+        used.push_back(lower(variable.name)); // and not the name of a declared variable either
     }
     const auto base = lower(type);
     for (int n = 1;; ++n) {

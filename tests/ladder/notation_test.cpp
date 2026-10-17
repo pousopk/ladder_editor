@@ -30,6 +30,7 @@ TEST_CASE("Formatting and parsing are each other's reverse") {
         "{R_TRIG edge} {CTU count, R := reset, PV := 10, CV => total} => done",
         "%IX0.0 t1.Q sensors[2] => %QX0.1",
         "{TON t1, PT := T#1m30s} (x | {TP pulse, PT := T#200ms, ET => left}) => R:latched",
+        "? /? {TON ?} => ?, S:?", // operands not filled in yet
     };
     for (const char* text : rungs) {
         CAPTURE(text);
@@ -38,6 +39,14 @@ TEST_CASE("Formatting and parsing are each other's reverse") {
         CHECK(formatRung(*rung) == text);
         CHECK(parseRung(formatRung(*rung)).value() == *rung);
     }
+}
+
+TEST_CASE("A lone ? is an operand not filled in yet") {
+    const auto rung = parseRung("? /? {CTU ?} => ?").value();
+    CHECK(std::get<Contact>(rung.logic.elements[0]).operand.empty());
+    CHECK(std::get<Contact>(rung.logic.elements[1]).operand.empty());
+    CHECK(std::get<Box>(rung.logic.elements[2]).instance.empty());
+    CHECK(rung.coils[0].operand.empty());
 }
 
 TEST_CASE("Spacing doesn't matter when reading") {

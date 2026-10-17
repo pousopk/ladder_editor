@@ -8,12 +8,12 @@ namespace ladder {
 ReplaceRung::ReplaceRung(std::size_t index, Rung before, Rung after, std::string what)
     : index_(index), before_(std::move(before)), after_(std::move(after)), what_(std::move(what)) {}
 
-void ReplaceRung::apply(std::vector<Rung>& rungs) const {
-    rungs.at(index_) = after_;
+void ReplaceRung::apply(Block& block) const {
+    block.networks.at(index_) = after_;
 }
 
-void ReplaceRung::revert(std::vector<Rung>& rungs) const {
-    rungs.at(index_) = before_;
+void ReplaceRung::revert(Block& block) const {
+    block.networks.at(index_) = before_;
 }
 
 bool ReplaceRung::absorb(const Command& next) {
@@ -28,12 +28,12 @@ bool ReplaceRung::absorb(const Command& next) {
 
 InsertNetwork::InsertNetwork(std::size_t index, Rung rung) : index_(index), rung_(std::move(rung)) {}
 
-void InsertNetwork::apply(std::vector<Rung>& rungs) const {
-    rungs.insert(rungs.begin() + static_cast<std::ptrdiff_t>(index_), rung_);
+void InsertNetwork::apply(Block& block) const {
+    block.networks.insert(block.networks.begin() + static_cast<std::ptrdiff_t>(index_), rung_);
 }
 
-void InsertNetwork::revert(std::vector<Rung>& rungs) const {
-    rungs.erase(rungs.begin() + static_cast<std::ptrdiff_t>(index_));
+void InsertNetwork::revert(Block& block) const {
+    block.networks.erase(block.networks.begin() + static_cast<std::ptrdiff_t>(index_));
 }
 
 bool InsertNetwork::absorb(const Command& next) {
@@ -46,26 +46,43 @@ bool InsertNetwork::absorb(const Command& next) {
     return true;
 }
 
-RemoveNetwork::RemoveNetwork(std::size_t index, Rung rung) : index_(index), rung_(std::move(rung)) {}
-
-void RemoveNetwork::apply(std::vector<Rung>& rungs) const {
-    rungs.erase(rungs.begin() + static_cast<std::ptrdiff_t>(index_));
+Interface interfaceOf(const Block& block) {
+    return Interface{block.variables, block.returnType};
 }
 
-void RemoveNetwork::revert(std::vector<Rung>& rungs) const {
-    rungs.insert(rungs.begin() + static_cast<std::ptrdiff_t>(index_), rung_);
+ReplaceInterface::ReplaceInterface(Interface before, Interface after, std::string what)
+    : before_(std::move(before)), after_(std::move(after)), what_(std::move(what)) {}
+
+void ReplaceInterface::apply(Block& block) const {
+    block.variables = after_.variables;
+    block.returnType = after_.returnType;
+}
+
+void ReplaceInterface::revert(Block& block) const {
+    block.variables = before_.variables;
+    block.returnType = before_.returnType;
+}
+
+RemoveNetwork::RemoveNetwork(std::size_t index, Rung rung) : index_(index), rung_(std::move(rung)) {}
+
+void RemoveNetwork::apply(Block& block) const {
+    block.networks.erase(block.networks.begin() + static_cast<std::ptrdiff_t>(index_));
+}
+
+void RemoveNetwork::revert(Block& block) const {
+    block.networks.insert(block.networks.begin() + static_cast<std::ptrdiff_t>(index_), rung_);
 }
 
 SwapNetworks::SwapNetworks(std::size_t first, std::size_t second) : first_(first), second_(second) {}
 
-void SwapNetworks::apply(std::vector<Rung>& rungs) const {
-    std::swap(rungs.at(first_), rungs.at(second_));
+void SwapNetworks::apply(Block& block) const {
+    std::swap(block.networks.at(first_), block.networks.at(second_));
 }
 
 // ---------------------------------------------------------------- History
 
-void History::perform(std::unique_ptr<Command> command, std::vector<Rung>& rungs) {
-    command->apply(rungs);
+void History::perform(std::unique_ptr<Command> command, Block& block) {
+    command->apply(block);
     push(std::move(command));
 }
 
@@ -101,25 +118,25 @@ std::string History::redoDescription() const {
     return undone_.empty() ? std::string() : undone_.back()->description();
 }
 
-std::optional<Selection> History::undo(std::vector<Rung>& rungs) {
+std::optional<Selection> History::undo(Block& block) {
     if (done_.empty()) {
         return std::nullopt;
     }
     auto command = std::move(done_.back());
     done_.pop_back();
-    command->revert(rungs);
+    command->revert(block);
     auto selection = command->selectionBefore;
     undone_.push_back(std::move(command));
     return selection;
 }
 
-std::optional<Selection> History::redo(std::vector<Rung>& rungs) {
+std::optional<Selection> History::redo(Block& block) {
     if (undone_.empty()) {
         return std::nullopt;
     }
     auto command = std::move(undone_.back());
     undone_.pop_back();
-    command->apply(rungs);
+    command->apply(block);
     auto selection = command->selectionAfter;
     done_.push_back(std::move(command));
     return selection;

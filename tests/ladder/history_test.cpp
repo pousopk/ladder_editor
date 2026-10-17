@@ -7,25 +7,26 @@ using namespace ladder;
 
 namespace {
 
-std::vector<Rung> rungs(std::initializer_list<const char*> texts) {
-    std::vector<Rung> result;
+// A KOP block with these networks.
+Block rungs(std::initializer_list<const char*> texts) {
+    Block result;
     for (const char* text : texts) {
-        result.push_back(parseRung(text).value());
+        result.networks.push_back(parseRung(text).value());
     }
     return result;
 }
 
-std::vector<std::string> texts(const std::vector<Rung>& rs) {
+std::vector<std::string> texts(const Block& rs) {
     std::vector<std::string> result;
-    for (const auto& r : rs) {
+    for (const auto& r : rs.networks) {
         result.push_back(formatRung(r));
     }
     return result;
 }
 
 // An edit of one rung as a command: change a copy, keep both.
-std::unique_ptr<Command> edit(const std::vector<Rung>& rs, std::size_t index, const char* after, const char* what) {
-    return std::make_unique<ReplaceRung>(index, rs[index], parseRung(after).value(), what);
+std::unique_ptr<Command> edit(const Block& rs, std::size_t index, const char* after, const char* what) {
+    return std::make_unique<ReplaceRung>(index, rs.networks[index], parseRung(after).value(), what);
 }
 
 } // namespace
@@ -73,7 +74,7 @@ TEST_CASE("Network commands") {
     CHECK(texts(rs) == std::vector<std::string>{"a => x", "=> new", "b => y"});
     history.perform(std::make_unique<SwapNetworks>(1, 2), rs);
     CHECK(texts(rs) == std::vector<std::string>{"a => x", "b => y", "=> new"});
-    history.perform(std::make_unique<RemoveNetwork>(0, rs[0]), rs);
+    history.perform(std::make_unique<RemoveNetwork>(0, rs.networks[0]), rs);
     CHECK(texts(rs) == std::vector<std::string>{"b => y", "=> new"});
 
     history.undo(rs);
@@ -100,9 +101,10 @@ TEST_CASE("An operand typed right after inserting merges into one step") {
     History history;
     history.perform(edit(rs, 0, "a b => x", "insert contact"), rs);
     // The user types into the new contact: the change is made directly...
-    rs[0] = parseRung("a guard => x").value();
+    rs.networks[0] = parseRung("a guard => x").value();
     // ...and recorded afterwards, as part of the insertion.
-    history.record(std::make_unique<ReplaceRung>(0, parseRung("a b => x").value(), rs[0], "edit operand"), true);
+    history.record(std::make_unique<ReplaceRung>(0, parseRung("a b => x").value(), rs.networks[0], "edit operand"),
+                   true);
     CHECK(history.size() == 1);
     CHECK(history.undoDescription() == "insert contact");
     history.undo(rs);
@@ -115,12 +117,12 @@ TEST_CASE("A new network merges its first edit too, but edits of other networks 
     auto rs = rungs({"a => x"});
     History history;
     history.perform(std::make_unique<InsertNetwork>(1, parseRung("=> ").value_or(Rung{})), rs);
-    rs[1] = parseRung("=> ready").value();
-    history.record(std::make_unique<ReplaceRung>(1, Rung{}, rs[1], "edit operand"), true);
+    rs.networks[1] = parseRung("=> ready").value();
+    history.record(std::make_unique<ReplaceRung>(1, Rung{}, rs.networks[1], "edit operand"), true);
     CHECK(history.size() == 1);
 
-    rs[0] = parseRung("b => x").value();
-    history.record(std::make_unique<ReplaceRung>(0, parseRung("a => x").value(), rs[0], "edit operand"), true);
+    rs.networks[0] = parseRung("b => x").value();
+    history.record(std::make_unique<ReplaceRung>(0, parseRung("a => x").value(), rs.networks[0], "edit operand"), true);
     CHECK(history.size() == 2); // another network: its own step
 
     history.undo(rs);
@@ -160,4 +162,18 @@ TEST_CASE("The history keeps only its newest steps") {
     }
     CHECK(texts(rs) == std::vector<std::string>{"a => x2"}); // the two oldest steps are gone
     CHECK(history.modified());
+}
+
+TEST_CASE("Interface changes are commands too") {
+    Block block = rungs({"a => x"});
+    History history;
+    auto after = interfaceOf(block);
+    after.variables.push_back(Variable{"start", "BOOL", Section::Local, "", "%IX0.0", "start button"});
+    history.perform(std::make_unique<ReplaceInterface>(interfaceOf(block), after, "add variable"), block);
+    REQUIRE(block.variables.size() == 1);
+    CHECK(history.undoDescription() == "add variable");
+    history.undo(block);
+    CHECK(block.variables.empty());
+    history.redo(block);
+    CHECK(block.variables.at(0).address == "%IX0.0");
 }

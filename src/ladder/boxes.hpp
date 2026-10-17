@@ -3,8 +3,9 @@
 #include <vector>
 
 // The function blocks that can be placed in a rung as boxes, and how power
-// goes through each one. The standard blocks are built in; user-defined
-// function blocks will be added from the project (milestone 5).
+// goes through each one. The standard blocks are built in; boxes for the
+// project's own function blocks come once the editor can read the
+// interfaces of ST blocks too (soft_plc's parser, milestone 6).
 //
 //            ┌── TON ──┐
 //   power ──►│IN      Q│──► power

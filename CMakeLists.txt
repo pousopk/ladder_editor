@@ -35,8 +35,13 @@ function(ladder_editor_mark_system target)
   get_target_property(dirs ${target} INTERFACE_INCLUDE_DIRECTORIES)
   set_target_properties(${target} PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${dirs}")
 endfunction()
+# --- nlohmann/json: reading and writing project files ---
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
 ladder_editor_mark_system(fmt)
 ladder_editor_mark_system(expected)
+ladder_editor_mark_system(nlohmann_json)
 
 # --- Shared compile settings for our own targets ---
 add_library(ladder_editor_options INTERFACE)
@@ -60,11 +65,13 @@ add_library(ladder_core STATIC
   src/ladder/rung_file.cpp
   src/ladder/edit.cpp
   src/ladder/history.cpp
+  src/ladder/block.cpp
+  src/ladder/project_file.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
 target_link_libraries(ladder_core
   PUBLIC  ladder_editor_options tl::expected
-  PRIVATE fmt::fmt
+  PRIVATE fmt::fmt nlohmann_json::nlohmann_json
 )
 
 # --- Dear ImGui, without a window: enough for the editor's UI and its tests ---
@@ -84,7 +91,8 @@ ladder_editor_mark_system(imgui_core)
 # The editor's user interface, drawn with ImGui but not tied to a window, so
 # the UI tests can drive it with simulated mouse and keys.
 add_library(ladder_ui STATIC
-  src/app/editor_window.cpp
+  src/app/kop_editor.cpp
+  src/app/project_window.cpp
   src/view/rung_view.cpp
 )
 target_include_directories(ladder_ui PUBLIC src)

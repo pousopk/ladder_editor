@@ -1,0 +1,146 @@
+{
+  "interface": [
+    {
+      "address": "%IX0.0",
+      "comment": "start button",
+      "name": "start",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%IX0.1",
+      "comment": "stop button, wired normally closed",
+      "name": "stop",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%IX0.2",
+      "comment": "emergency stop, wired normally closed",
+      "name": "eStop",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%IX0.3",
+      "comment": "light barrier at the start of the belt",
+      "name": "boxAtStart",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%IX0.4",
+      "comment": "light barrier at the end of the belt",
+      "name": "boxAtEnd",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%IX0.5",
+      "comment": "clears a jam and the box count",
+      "name": "resetButton",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%QX0.1",
+      "comment": "blinks while jammed",
+      "name": "warningLamp",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "address": "%QX0.2",
+      "comment": "100 boxes counted",
+      "name": "batchFull",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "name": "running",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "name": "jammed",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "comment": "how long the box has been travelling",
+      "name": "travel",
+      "section": "VAR",
+      "type": "TON"
+    },
+    {
+      "name": "travelTime",
+      "section": "VAR",
+      "type": "TIME"
+    },
+    {
+      "name": "arrived",
+      "section": "VAR",
+      "type": "R_TRIG"
+    },
+    {
+      "name": "boxCount",
+      "section": "VAR",
+      "type": "CTU"
+    },
+    {
+      "name": "boxes",
+      "section": "VAR",
+      "type": "INT"
+    },
+    {
+      "name": "blinkOn",
+      "section": "VAR",
+      "type": "TON"
+    },
+    {
+      "name": "blinkOff",
+      "section": "VAR",
+      "type": "TON"
+    },
+    {
+      "name": "blinkPhase",
+      "section": "VAR",
+      "type": "BOOL"
+    },
+    {
+      "comment": "boxes per minute, in ST",
+      "name": "rate",
+      "section": "VAR",
+      "type": "BoxRate"
+    }
+  ],
+  "networks": [
+    {
+      "comment": "Start/stop: start holds itself, stop and the emergency stop (both wired normally closed) always win",
+      "rung": "(start | running) stop eStop => running"
+    },
+    {
+      "comment": "The belt motor follows \"running\", unless the jam detector tripped",
+      "rung": "running /jammed => %QX0.0"
+    },
+    {
+      "comment": "A box should reach the end sensor within 8 s of passing the start sensor",
+      "rung": "boxAtStart /boxAtEnd {TON travel, PT := T#8s, ET => travelTime} => S:jammed"
+    },
+    {
+      "comment": "The operator clears the jam with the reset button, once the end sensor is free again",
+      "rung": "resetButton /boxAtEnd => R:jammed"
+    },
+    {
+      "comment": "Count boxes: one per rising edge of the end sensor",
+      "rung": "{R_TRIG arrived} {CTU boxCount, R := resetButton, PV := 100, CV => boxes} => batchFull"
+    },
+    {
+      "comment": "The warning lamp blinks while jammed: two timers, each starting the other",
+      "rung": "jammed /blinkOff.Q {TON blinkOn, PT := T#500ms} => warningLamp"
+    },
+    {
+      "rung": "jammed blinkOn.Q {TON blinkOff, PT := T#500ms} => blinkPhase"
+    }
+  ]
+}

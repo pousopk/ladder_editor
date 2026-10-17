@@ -37,11 +37,18 @@ cmake -S . -B build          # Debug by default, with AddressSanitizer + UBSan
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 
-./build/ladder_editor                         # the built-in example
-./build/ladder_editor examples/conveyor.lad   # a rung file: one rung per line, // comments above
+./build/ladder_editor                         # the built-in example (not saved)
+./build/ladder_editor examples/conveyor       # a project folder: a KOP program and an ST function block
+./build/ladder_editor myproject               # a folder without a project: start a new one
 ```
 
-## Editing
+## Projects
+
+A project is a folder: `project.json` lists the blocks, and each block has its own file. KOP blocks are `Name.kop.json` (the interface, and each network in the one-line notation); ST blocks are plain `Name.st` files.
+
+The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks; an ST block is a text editor for now. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+
+## Editing KOP
 
 Click an element (or a network's title) to select it, then:
 
@@ -56,7 +63,7 @@ Click an element (or a network's title) to select it, then:
 | Del | delete the selection, or the network if only the network is selected |
 | Ctrl+N | add a network after the selected one |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | undo / redo |
-| Ctrl+S | save the rung file |
+| Ctrl+S | save the project |
 
 The same actions are on the toolbar. Every edit keeps the rung valid: there are no loose wires to draw.
 
@@ -69,8 +76,9 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `src/ladder/` | The model: rungs and elements (`rung.hpp`), the standard boxes (`boxes.hpp`), the checks (`check.hpp`), the text notation (`notation.hpp`), rung files (`rung_file.hpp`) and the layout on a grid (`layout.hpp`) |
 | `src/ladder/edit.hpp` | The structured edit operations |
 | `src/ladder/history.hpp` | Undo and redo: commands and the history |
+| `src/ladder/block.hpp`, `project_file.hpp` | Blocks, projects and their rules; project folders on disk |
 | `src/view/` | Drawing a rung with Dear ImGui (`rung_view.hpp`) |
-| `src/app/` | The application: `main.cpp` and the editor window |
-| `examples/` | Example rung files |
+| `src/app/` | The application: `main.cpp`, the project window and the KOP editor |
+| `examples/` | Example projects |
 | `tests/` | doctest unit tests, mirroring `src/`; `tests/ui/` drives the editor's UI headless, with simulated mouse and keys |
 | `docs/lessons/` | What each milestone teaches, with review questions |

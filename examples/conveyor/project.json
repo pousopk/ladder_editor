@@ -1,0 +1,18 @@
+{
+  "blocks": [
+    {
+      "file": "Main.kop.json",
+      "kind": "PROGRAM",
+      "language": "KOP",
+      "name": "Main"
+    },
+    {
+      "file": "BoxRate.st",
+      "kind": "FUNCTION_BLOCK",
+      "language": "ST",
+      "name": "BoxRate"
+    }
+  ],
+  "format": 1,
+  "name": "conveyor"
+}

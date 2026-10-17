@@ -1,24 +1,24 @@
-// ladder_editor: shows the rungs of a rung file (one rung per line in the
-// text notation, see src/ladder/rung_file.hpp).
+// ladder_editor: edits a project of KOP and ST blocks.
 //
-//   ladder_editor                         the built-in example (can't be saved)
-//   ladder_editor examples/conveyor.lad   open a file; Ctrl+S saves it
-//   ladder_editor new.lad                 a file that doesn't exist yet: start empty
-#include "app/editor_window.hpp"
+//   ladder_editor                       the built-in example (can't be saved)
+//   ladder_editor examples/conveyor     open a project folder; Ctrl+S saves it
+//   ladder_editor myproject             a folder without a project yet: start a new one
+#include "app/project_window.hpp"
+#include "ladder/block.hpp"
+#include "ladder/project_file.hpp"
 #include "ladder/rung_file.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-#include <sstream>
 #include <string>
 
 namespace {
 
-constexpr const char* kExample = R"(// Motor starter: start holds itself, stop (wired normally closed) always wins
+constexpr const char* kExampleNetworks =
+    R"(// Motor starter: start holds itself, stop (wired normally closed) always wins
 (start | motor) stop => motor
 
 // The lamp comes on 2 s after the motor starts
@@ -26,44 +26,53 @@ motor {TON lampDelay, PT := T#2s, ET => elapsed} => lamp
 
 // Count boxes on the conveyor, reset by the operator
 {R_TRIG boxEdge} {CTU boxes, R := resetCount, PV := 10, CV => count} => batchDone
-
-// Alarm: latched by a fault, cleared by acknowledge when the fault is gone
-fault => S:alarm
-acknowledge /fault => R:alarm
 )";
 
-bool readFile(const std::string& path, std::string& text) {
-    std::ifstream file(path);
-    if (!file) {
-        return false;
-    }
-    std::ostringstream contents;
-    contents << file.rdbuf();
-    text = contents.str();
-    return true;
+ladder::Project exampleProject() {
+    using namespace ladder;
+    Project project;
+    project.name = "example";
+    auto main = newBlock("Main", BlockKind::Program, Language::Kop);
+    main.networks = parseRungFile(kExampleNetworks).value();
+    main.variables = {
+        Variable{"start", "BOOL", Section::Local, "", "%IX0.0", "start button"},
+        Variable{"stop", "BOOL", Section::Local, "", "%IX0.1", "stop button, wired normally closed"},
+        Variable{"motor", "BOOL", Section::Local, "", "%QX0.0", ""},
+        Variable{"lamp", "BOOL", Section::Local, "", "%QX0.1", ""},
+        Variable{"lampDelay", "TON", Section::Local, "", "", ""},
+        Variable{"elapsed", "TIME", Section::Local, "", "", ""},
+    };
+    project.blocks.push_back(std::move(main));
+    project.blocks.push_back(newBlock("Mixer", BlockKind::FunctionBlock, Language::St));
+    return project;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string path; // empty: the built-in example
-    std::string text = kExample;
+    namespace fs = std::filesystem;
+    fs::path folder; // empty: the built-in example
+    ladder::Project project;
     if (argc == 2) {
-        path = argv[1];
-        if (!std::filesystem::exists(path)) {
-            text.clear(); // a new file
-        } else if (!readFile(path, text)) {
-            std::fprintf(stderr, "cannot open '%s'\n", argv[1]);
-            return 1;
+        folder = argv[1];
+        if (fs::exists(folder / "project.json")) {
+            auto loaded = ladder::loadProject(folder);
+            if (!loaded) {
+                std::fprintf(stderr, "%s: %s\n", folder.string().c_str(), loaded.error().c_str());
+                return 1;
+            }
+            project = std::move(*loaded);
+        } else {
+            // A new project: one KOP PROGRAM to start with. Nothing is
+            // written until it's saved.
+            project.name = folder.filename().string();
+            project.blocks.push_back(ladder::newBlock("Main", ladder::BlockKind::Program, ladder::Language::Kop));
         }
-    } else if (argc > 2) {
-        std::fprintf(stderr, "usage: ladder_editor [rungs.lad]\n");
+    } else if (argc == 1) {
+        project = exampleProject();
+    } else {
+        std::fprintf(stderr, "usage: ladder_editor [project folder]\n");
         return 2;
-    }
-    auto rungs = ladder::parseRungFile(text);
-    if (!rungs) {
-        std::fprintf(stderr, "%s: %s\n", path.empty() ? "built-in example" : path.c_str(), rungs.error().c_str());
-        return 1;
     }
 
     glfwSetErrorCallback(
@@ -73,7 +82,7 @@ int main(int argc, char** argv) {
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    GLFWwindow* window = glfwCreateWindow(1280, 860, "ladder_editor", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1400, 900, "ladder_editor", nullptr, nullptr);
     if (window == nullptr) {
         glfwTerminate();
         return 1;
@@ -88,8 +97,19 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init("#version 130");
 
     {
-        app::EditorWindow editor(path, std::move(*rungs));
-        while (!glfwWindowShouldClose(window)) {
+        app::ProjectWindow editor(std::move(project), folder);
+        for (;;) {
+            // Closing the window with unsaved changes asks first.
+            if (glfwWindowShouldClose(window)) {
+                if (!editor.modified() || editor.closeConfirmed()) {
+                    break;
+                }
+                glfwSetWindowShouldClose(window, GLFW_FALSE);
+                editor.askToClose();
+            }
+            if (editor.closeConfirmed()) {
+                break;
+            }
             glfwPollEvents();
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
