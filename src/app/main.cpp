@@ -1,12 +1,14 @@
 // ladder_editor: shows the rungs of a rung file (one rung per line in the
 // text notation, see src/ladder/rung_file.hpp).
 //
-//   ladder_editor                         the built-in example
-//   ladder_editor examples/conveyor.lad
+//   ladder_editor                         the built-in example (can't be saved)
+//   ladder_editor examples/conveyor.lad   open a file; Ctrl+S saves it
+//   ladder_editor new.lad                 a file that doesn't exist yet: start empty
 #include "app/editor_window.hpp"
 #include "ladder/rung_file.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -44,11 +46,13 @@ bool readFile(const std::string& path, std::string& text) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string title = "built-in example";
+    std::string path; // empty: the built-in example
     std::string text = kExample;
     if (argc == 2) {
-        title = argv[1];
-        if (!readFile(argv[1], text)) {
+        path = argv[1];
+        if (!std::filesystem::exists(path)) {
+            text.clear(); // a new file
+        } else if (!readFile(path, text)) {
             std::fprintf(stderr, "cannot open '%s'\n", argv[1]);
             return 1;
         }
@@ -58,7 +62,7 @@ int main(int argc, char** argv) {
     }
     auto rungs = ladder::parseRungFile(text);
     if (!rungs) {
-        std::fprintf(stderr, "%s: %s\n", title.c_str(), rungs.error().c_str());
+        std::fprintf(stderr, "%s: %s\n", path.empty() ? "built-in example" : path.c_str(), rungs.error().c_str());
         return 1;
     }
 
@@ -84,7 +88,7 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init("#version 130");
 
     {
-        app::EditorWindow editor(title, std::move(*rungs));
+        app::EditorWindow editor(path, std::move(*rungs));
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
             ImGui_ImplOpenGL3_NewFrame();

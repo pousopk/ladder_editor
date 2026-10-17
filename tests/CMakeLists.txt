@@ -9,6 +9,16 @@ add_executable(ladder_tests
   ladder/check_test.cpp
   ladder/layout_test.cpp
   ladder/rung_file_test.cpp
+  ladder/edit_test.cpp
 )
 target_link_libraries(ladder_tests PRIVATE ladder_core doctest::doctest fmt::fmt)
 add_test(NAME ladder_tests COMMAND ladder_tests)
+
+# The editor's UI, driven headless: no window, simulated mouse and keyboard.
+add_executable(ladder_ui_tests
+  test_main.cpp
+  ui/editor_ui_test.cpp
+)
+target_link_libraries(ladder_ui_tests PRIVATE ladder_ui doctest::doctest fmt::fmt)
+target_compile_definitions(ladder_ui_tests PRIVATE LADDER_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME ladder_ui_tests COMMAND ladder_ui_tests)

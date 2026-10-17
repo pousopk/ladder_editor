@@ -19,7 +19,11 @@ struct Metrics {
 struct RungView {
     ImVec2 size;                             // the space the rung takes, including the rails
     std::optional<ladder::ItemPath> hovered; // the element under the mouse, if any
+    bool overRung = false;                   // the mouse is somewhere over the rung
 };
+
+// The centre of a placed item in pixels, for a rung drawn at `origin`.
+ImVec2 itemCenter(const ladder::PlacedItem& item, ImVec2 origin, float zoom);
 
 // Draws `rung` at the current ImGui cursor and moves the cursor below it.
 // `selected` is drawn highlighted. `id` must be unique per rung in the window.

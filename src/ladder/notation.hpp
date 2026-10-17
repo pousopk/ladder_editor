@@ -20,6 +20,7 @@
 namespace ladder {
 
 std::string formatRung(const Rung& rung);
+std::string formatElement(const Element& element); // one element: start, /stop, (a | b), {TON t1, ...}
 
 // Reads a rung, or describes the first problem and where it is.
 tl::expected<Rung, std::string> parseRung(std::string_view text);

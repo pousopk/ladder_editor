@@ -11,6 +11,8 @@ namespace {
 
 std::string formatSeries(const Series& series);
 
+} // namespace
+
 std::string formatElement(const Element& element) {
     if (const auto* contact = std::get_if<Contact>(&element)) {
         return (contact->kind == ContactKind::NormallyClosed ? "/" : "") + contact->operand;
@@ -32,6 +34,8 @@ std::string formatElement(const Element& element) {
     }
     return text + ")";
 }
+
+namespace {
 
 std::string formatSeries(const Series& series) {
     std::string text;

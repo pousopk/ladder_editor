@@ -16,6 +16,10 @@ const ImU32 kPinText = IM_COL32(160, 165, 175, 255);
 const ImU32 kHover = IM_COL32(90, 140, 220, 60);
 const ImU32 kSelected = IM_COL32(90, 140, 220, 120);
 const ImU32 kSelectedBorder = IM_COL32(120, 170, 255, 255);
+const ImU32 kMissing = IM_COL32(240, 160, 70, 255);
+
+// An operand as shown: "???" in orange while it's still empty.
+void operandText(ImDrawList* draw, float centerX, float y, const std::string& operand);
 
 // Converts grid positions to pixels for one rung.
 class Grid {
@@ -44,6 +48,10 @@ void centeredText(ImDrawList* draw, float centerX, float y, ImU32 color, const s
     draw->AddText({centerX - size.x / 2.0F, y}, color, text.c_str());
 }
 
+void operandText(ImDrawList* draw, float centerX, float y, const std::string& operand) {
+    centeredText(draw, centerX, y, operand.empty() ? kMissing : kText, operand.empty() ? "???" : operand);
+}
+
 // A wire from the left edge of a cell to a symbol, and from the symbol to the right edge.
 void stubs(ImDrawList* draw, float left, float right, float y, float halfSymbol, float thickness) {
     const float center = (left + right) / 2.0F;
@@ -65,7 +73,7 @@ void drawContact(ImDrawList* draw, const Grid& g, const PlacedItem& item, const 
     if (contact.kind == ContactKind::NormallyClosed) {
         draw->AddLine({center - half - g.scale(3), y + tall}, {center + half + g.scale(3), y - tall}, kWire, thickness);
     }
-    centeredText(draw, center, y - tall - g.scale(18.0F), kText, contact.operand);
+    operandText(draw, center, y - tall - g.scale(18.0F), contact.operand);
 }
 
 void drawCoil(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Coil& coil) {
@@ -87,7 +95,7 @@ void drawCoil(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Coi
     } else if (coil.kind == CoilKind::Negated) {
         draw->AddLine({center - g.scale(5), y + g.scale(7)}, {center + g.scale(5), y - g.scale(7)}, kWire, thickness);
     }
-    centeredText(draw, center, y - radius - g.scale(18.0F), kText, coil.operand);
+    operandText(draw, center, y - radius - g.scale(18.0F), coil.operand);
 }
 
 // The operand connected to a pin, or "..." if nothing is (as in TIA Portal).
@@ -116,7 +124,7 @@ void drawBox(ImDrawList* draw, const Grid& g, const PlacedItem& item, const Box&
 
     const float center = (left + right) / 2.0F;
     const float line = ImGui::GetTextLineHeight();
-    centeredText(draw, center, boxTop - line - g.scale(2.0F), kText, box.instance);
+    operandText(draw, center, boxTop - line - g.scale(2.0F), box.instance);
     centeredText(draw, center, boxTop + g.scale(2.0F), kText, box.type);
 
     const auto* type = findBoxType(box.type);
@@ -154,6 +162,11 @@ bool contains(const ImVec4& r, ImVec2 p) {
 
 } // namespace
 
+ImVec2 itemCenter(const PlacedItem& item, ImVec2 origin, float zoom) {
+    const Grid g(origin, zoom);
+    return {(g.x(item.column) + g.x(item.column + item.width)) / 2.0F, g.y(item.row)};
+}
+
 RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std::optional<ItemPath>& selected,
                   float zoom) {
     const Metrics m;
@@ -169,7 +182,7 @@ RungView drawRung(const Rung& rung, const RungLayout& layout, int id, const std:
     const Grid g(origin, zoom);
     const float thickness = g.scale(1.6F);
     const ImVec2 mouse = ImGui::GetIO().MousePos;
-    RungView result{size, std::nullopt};
+    RungView result{size, std::nullopt, overRung};
 
     // Highlights first, so the symbols are drawn over them.
     for (const auto& item : layout.items) {
