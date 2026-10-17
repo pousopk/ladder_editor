@@ -59,6 +59,7 @@ add_library(ladder_core STATIC
   src/ladder/layout.cpp
   src/ladder/rung_file.cpp
   src/ladder/edit.cpp
+  src/ladder/history.cpp
 )
 target_include_directories(ladder_core PUBLIC src)
 target_link_libraries(ladder_core

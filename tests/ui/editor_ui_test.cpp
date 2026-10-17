@@ -74,7 +74,7 @@ public:
     // Presses and releases a key, optionally while holding Ctrl or Shift.
     // Like a real backend, it sends both the key (ImGuiKey_LeftCtrl) and the
     // modifier state (ImGuiMod_Ctrl), which is what io.KeyCtrl reads.
-    void key(ImGuiKey key, ImGuiKey modifier = ImGuiKey_None) {
+    void key(ImGuiKey key, ImGuiKey modifier = ImGuiKey_None, bool withShift = false) {
         auto& io = ImGui::GetIO();
         const ImGuiKey mod = modifier == ImGuiKey_LeftCtrl    ? ImGuiMod_Ctrl
                              : modifier == ImGuiKey_LeftShift ? ImGuiMod_Shift
@@ -83,14 +83,34 @@ public:
             io.AddKeyEvent(modifier, true);
             io.AddKeyEvent(mod, true);
         }
+        if (withShift) {
+            io.AddKeyEvent(ImGuiKey_LeftShift, true);
+            io.AddKeyEvent(ImGuiMod_Shift, true);
+        }
         io.AddKeyEvent(key, true);
         frame();
         io.AddKeyEvent(key, false);
+        if (withShift) {
+            io.AddKeyEvent(ImGuiKey_LeftShift, false);
+            io.AddKeyEvent(ImGuiMod_Shift, false);
+        }
         if (mod != ImGuiKey_None) {
             io.AddKeyEvent(modifier, false);
             io.AddKeyEvent(mod, false);
         }
         frame();
+        frame();
+    }
+
+    // Clicks a point on the screen.
+    void clickAt(ImVec2 position) {
+        auto& io = ImGui::GetIO();
+        pause();
+        io.AddMousePosEvent(position.x, position.y);
+        frame();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        frame();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         frame();
     }
 
@@ -250,4 +270,106 @@ TEST_CASE("Ctrl+S writes the rung file") {
     text << file.rdbuf();
     CHECK(text.str() == "a => x\n");
     std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------- Undo and redo
+
+TEST_CASE("Inserting a contact and typing its operand is one step to undo") {
+    Ui ui(rungs({"start => motor"}));
+    ui.click(0, at({0}));
+    ui.key(ImGuiKey_C);
+    ui.type("guard");
+    ui.key(ImGuiKey_Enter);
+    CHECK(ui.rung(0) == "start guard => motor");
+    CHECK(ui.editor().history().size() == 1);
+    CHECK(ui.editor().history().undoDescription() == "insert contact");
+
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.rung(0) == "start => motor");
+    CHECK_FALSE(ui.editor().modified()); // back as it was opened
+    ui.key(ImGuiKey_Y, ImGuiKey_LeftCtrl);
+    CHECK(ui.rung(0) == "start guard => motor"); // with its operand
+    CHECK(ui.editor().selection()->item == ItemPath{at({1})});
+}
+
+TEST_CASE("Undo brings a deleted element back, and selects it again") {
+    Ui ui(rungs({"(a | b) c => x"}));
+    ui.click(0, at({0, 1, 0})); // b
+    ui.key(ImGuiKey_Delete);
+    CHECK(ui.rung(0) == "a c => x");
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.rung(0) == "(a | b) c => x");
+    CHECK(ui.editor().selection()->item == ItemPath{at({0, 1, 0})});
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl, true); // Ctrl+Shift+Z: redo
+    CHECK(ui.rung(0) == "a c => x");
+}
+
+TEST_CASE("Editing an existing operand is its own step") {
+    Ui ui(rungs({"a => x"}));
+    ui.click(0, at({0}));
+    ui.key(ImGuiKey_C);
+    ui.type("b");
+    ui.key(ImGuiKey_Enter);  // step 1: insert b
+    ui.click(0, at({0}), 2); // double-click a
+    ui.type("first");
+    ui.key(ImGuiKey_Enter); // step 2: edit a
+    CHECK(ui.rung(0) == "first b => x");
+    CHECK(ui.editor().history().size() == 2);
+    CHECK(ui.editor().history().undoDescription() == "edit contact");
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.rung(0) == "a b => x");
+}
+
+TEST_CASE("A new network and its first coil's operand are one step") {
+    Ui ui(rungs({"a => x"}));
+    ui.click(0, at({0}));
+    ui.key(ImGuiKey_N, ImGuiKey_LeftCtrl);
+    ui.type("ready");
+    ui.key(ImGuiKey_Enter);
+    REQUIRE(ui.editor().rungs().size() == 2);
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.editor().rungs().size() == 1);
+    ui.key(ImGuiKey_Y, ImGuiKey_LeftCtrl);
+    REQUIRE(ui.editor().rungs().size() == 2);
+    CHECK(ui.rung(1) == "=> ready");
+}
+
+TEST_CASE("Deleting a network can be undone") {
+    Ui ui(rungs({"a => x", "b => y"}));
+    ui.clickNetworkBackground(0);
+    ui.key(ImGuiKey_Delete);
+    REQUIRE(ui.editor().rungs().size() == 1);
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    REQUIRE(ui.editor().rungs().size() == 2);
+    CHECK(ui.rung(0) == "a => x");
+}
+
+TEST_CASE("The unsaved mark follows the history") {
+    const auto path = std::filesystem::temp_directory_path() / "ladder_ui_test_modified.lad";
+    std::filesystem::remove(path);
+    Ui ui(rungs({"a b => x"}), path.string());
+    ui.click(0, at({1}));
+    ui.key(ImGuiKey_Delete);
+    ui.key(ImGuiKey_S, ImGuiKey_LeftCtrl);
+    CHECK_FALSE(ui.editor().modified());
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.editor().modified()); // differs from what's saved
+    ui.key(ImGuiKey_Y, ImGuiKey_LeftCtrl);
+    CHECK_FALSE(ui.editor().modified()); // the saved state again
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("A comment typed into the field is one step to undo") {
+    Ui ui(rungs({"a => x"}));
+    ui.clickNetworkBackground(0);
+    const auto field = ui.editor().commentFieldCenter();
+    REQUIRE(field.has_value());
+    ui.clickAt(*field);
+    ui.type("Lamp test");
+    ui.clickNetworkBackground(0); // leave the field
+    CHECK(ui.editor().rungs()[0].comment == "Lamp test");
+    CHECK(ui.editor().history().size() == 1);
+    CHECK(ui.editor().history().undoDescription() == "edit comment");
+    ui.key(ImGuiKey_Z, ImGuiKey_LeftCtrl);
+    CHECK(ui.editor().rungs()[0].comment.empty());
 }
