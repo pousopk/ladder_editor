@@ -35,6 +35,14 @@ A graphical editor for PLC programs in **KOP** (ladder logic) and **ST** (Struct
 
 ## Building
 
+It builds `soft_plc` from source, from a folder next to it, so clone both side by side:
+
+```bash
+git clone https://github.com/pousopk/soft_plc.git
+git clone https://github.com/pousopk/ladder_editor.git
+cd ladder_editor
+```
+
 `ladder_editor` uses `soft_plc` as a library, from `../soft_plc` next to it (or set `-DLADDER_EDITOR_SOFT_PLC_DIR=...`).
 
 ```bash
@@ -107,3 +115,7 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `tests/` | doctest unit tests, mirroring `src/`; `tests/ui/` drives the editor's UI headless, with simulated mouse and keys |
 | `docs/lessons/` | What each milestone teaches, with review questions |
 | `docs/design/` | Design notes: why the editor is shaped as it is (the model, undo, immediate mode, threads, containers), with review questions |
+
+## License
+
+MIT: see [LICENSE](LICENSE).
