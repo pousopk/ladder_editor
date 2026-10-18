@@ -106,3 +106,4 @@ The application needs GLFW and OpenGL development files (`libglfw3-dev`, `libgl-
 | `examples/` | Example projects |
 | `tests/` | doctest unit tests, mirroring `src/`; `tests/ui/` drives the editor's UI headless, with simulated mouse and keys |
 | `docs/lessons/` | What each milestone teaches, with review questions |
+| `docs/design/` | Design notes: why the editor is shaped as it is (the model, undo, immediate mode, threads, containers), with review questions |
