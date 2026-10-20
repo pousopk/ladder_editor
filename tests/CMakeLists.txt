@@ -13,6 +13,7 @@ add_executable(ladder_tests
   ladder/history_test.cpp
   ladder/project_test.cpp
   ladder/translate_test.cpp
+  ladder/st_split_test.cpp
   ladder/power_test.cpp
   text/text_document_test.cpp
 )

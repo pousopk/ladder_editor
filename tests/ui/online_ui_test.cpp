@@ -1,4 +1,5 @@
 #include "harness.hpp"
+#include "ladder/project_file.hpp"
 
 // Online mode: the project runs in the simulator, and the editor shows and
 // changes its values.
@@ -132,19 +133,20 @@ TEST_CASE("A function block is watched through an instance; ST lines show their 
     CHECK(ui.waitFor([&] { return code->notes().size() > 4 && code->notes()[4] == "n = 7"; }));
 }
 
-#include "app/example.hpp"
-
-TEST_CASE("The built-in example compiles, and runs in the simulator") {
-    Ui ui(app::exampleProject(), "");
+TEST_CASE("The conveyor example compiles, and runs in the simulator") {
+    auto conveyor = loadProject(LADDER_EDITOR_SOURCE_DIR "/examples/conveyor");
+    REQUIRE_MESSAGE(conveyor.has_value(), (conveyor ? "" : conveyor.error()));
+    Ui ui(std::move(*conveyor), "");
     CHECK(checkProject(ui.window().project()).empty());
     CHECK_FALSE(ui.window().codeError().has_value());
     REQUIRE(ui.window().simulate());
     auto* session = ui.window().session();
-    // stop is wired normally closed: its input is TRUE while nobody presses
-    // it. The simulator's inputs start at 0, as if it were pressed.
+    // stop and eStop are wired normally closed: their inputs are TRUE while
+    // nobody presses them. The simulator's inputs start at 0, as if pressed.
     session->send("WRITE stop TRUE");
+    session->send("WRITE eStop TRUE");
     session->send("WRITE start TRUE");
-    CHECK(ui.waitFor([&] { return session->boolean("motor") == true; }));
+    CHECK(ui.waitFor([&] { return session->boolean("running") == true; }));
 }
 
 TEST_CASE("The watch table: lines are added and edited offline, and mark the project modified") {
@@ -201,4 +203,115 @@ TEST_CASE("Text too long for its place is cut, never in the middle of a characte
     const auto umlauts = view::fitText("öööööööööööö", 40.0F);
     CHECK(umlauts.substr(umlauts.size() - 2) == "..");
     CHECK((umlauts.size() - 2) % 2 == 0); // whole two-byte characters only
+}
+
+// ---------------------------------------------------------------- Upload
+
+namespace {
+
+const char* kPlant = "FUNCTION_BLOCK Fb\nVAR_INPUT x : BOOL; END_VAR\nEND_FUNCTION_BLOCK\n\n"
+                     "PROGRAM Plant\nVAR\n  f : Fb;\n  count : INT;\nEND_VAR\n  count := count + 1;\nEND_PROGRAM\n";
+
+// A soft_plc running kPlant, as if started on its own: the window connects
+// to it like to any other.
+std::unique_ptr<online::Simulator> plant() {
+    auto started = online::Simulator::start(kPlant);
+    REQUIRE_MESSAGE(started.has_value(), (started ? "" : started.error()));
+    return std::move(*started);
+}
+
+bool showing(Ui& ui, const char* widget) { return ui.window().widgets().center(widget).has_value(); }
+
+} // namespace
+
+TEST_CASE("Upload takes the PLC's program: one ST block per declaration, online at once") {
+    const auto plc = plant();
+    Ui ui(newProject("untitled"), "");
+    REQUIRE(ui.window().connect(plc->port()));
+    ui.frame();
+    ui.clickWidget("upload");
+    REQUIRE(ui.waitFor([&] { return ui.window().project().name == "Plant"; }));
+    const auto& blocks = ui.window().project().blocks;
+    REQUIRE(blocks.size() == 2);
+    CHECK(blocks[0].name == "Fb");
+    CHECK(blocks[0].kind == BlockKind::FunctionBlock);
+    CHECK(blocks[0].language == Language::St);
+    CHECK(blocks[1].name == "Plant");
+    CHECK(blocks[1].kind == BlockKind::Program);
+    CHECK(blocks[1].language == Language::St);
+    CHECK(ui.window().currentBlock() == 1);
+    CHECK(ui.window().modified()); // never saved
+    CHECK(ui.window().folder().empty());
+    CHECK(ui.window().note() == "Uploaded 2 blocks from the PLC.");
+    ui.frame();
+    CHECK_FALSE(showing(ui, "download")); // the PLC runs exactly this
+    auto* session = ui.window().session();
+    REQUIRE(session != nullptr);
+    CHECK(ui.waitFor([&] { return session->value("count").has_value(); }));
+}
+
+TEST_CASE("Upload over unsaved changes asks first") {
+    const auto plc = plant();
+    Ui ui(newProject("untitled"), "");
+    ui.clickWidget("+ variable");
+    REQUIRE(ui.window().modified());
+    REQUIRE(ui.window().connect(plc->port()));
+    ui.frame();
+    ui.clickWidget("upload");
+    ui.frame();
+    REQUIRE(showing(ui, "upload cancel"));
+    ui.clickWidget("upload cancel");
+    CHECK_FALSE(ui.window().uploadPending());
+    CHECK(ui.window().project().name == "untitled");
+
+    ui.clickWidget("upload");
+    ui.frame();
+    ui.clickWidget("upload anyway");
+    CHECK(ui.waitFor([&] { return ui.window().project().name == "Plant"; }));
+}
+
+TEST_CASE("Upload refuses while a download is waiting, and the other way round") {
+    const auto plc = plant();
+    Ui ui(newProject("untitled"), "");
+    REQUIRE(ui.window().connect(plc->port()));
+    ui.frame();
+    CHECK(ui.window().upload());
+    CHECK(ui.window().uploadPending());
+    CHECK_FALSE(ui.window().download());
+    CHECK_FALSE(ui.window().upload());
+    REQUIRE(ui.waitFor([&] { return !ui.window().uploadPending(); }));
+    REQUIRE(ui.window().project().name == "Plant");
+
+    ui.clickWidget("source"); // Plant is open: change it, so there's something to download
+    ui.key(ImGuiKey_End, ImGuiKey_LeftCtrl);
+    ui.type("\n// changed");
+    REQUIRE(ui.window().download());
+    CHECK(ui.window().downloadPending());
+    CHECK_FALSE(ui.window().upload());
+}
+
+TEST_CASE("Upload isn't offered while simulating") {
+    Ui ui(newProject("untitled"), "");
+    REQUIRE(ui.window().simulate());
+    ui.frame();
+    CHECK_FALSE(showing(ui, "upload"));
+}
+
+TEST_CASE("Saving an uploaded project doesn't make the PLC look out of date") {
+    const auto folder = std::filesystem::temp_directory_path() / "ladder_online_ui_test" / "saved";
+    std::filesystem::remove_all(folder);
+    const auto plc = plant();
+    Ui ui(newProject("untitled"), "");
+    REQUIRE(ui.window().connect(plc->port()));
+    ui.frame();
+    ui.clickWidget("upload");
+    REQUIRE(ui.waitFor([&] { return ui.window().project().name == "Plant"; }));
+    ui.clickWidget("save");
+    ui.key(ImGuiKey_A, ImGuiKey_LeftCtrl);
+    ui.type(folder.string().c_str());
+    ui.clickWidget("save here");
+    REQUIRE(ui.window().folder() == folder);
+    ui.frame();
+    ui.frame();
+    CHECK_FALSE(showing(ui, "download"));
 }

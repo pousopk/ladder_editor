@@ -50,22 +50,23 @@ cmake -S . -B build          # Debug by default, with AddressSanitizer + UBSan
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 
-./build/ladder_editor                         # the built-in example (not saved)
+./build/ladder_editor                         # a blank project; Save asks for a folder
 ./build/ladder_editor examples/conveyor       # a project folder: a KOP program and an ST function block
 ./build/ladder_editor myproject               # a folder without a project: start a new one
 ./build/ladder_editor --simulate examples/conveyor     # and go online at once, in the simulator
 ./build/ladder_editor --connect=5020 examples/conveyor # or with a soft_plc running with --monitor=5020
+./build/ladder_editor --connect=5020           # go online with a running soft_plc, then Upload its program
 ```
 
 ## Projects
 
 A project is a folder: `project.json` lists the blocks, and each block has its own file. KOP blocks are `Name.kop.json` (the interface, and each network in the one-line notation); ST blocks are plain `Name.st` files.
 
-The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours. Whenever anything changes, the KOP blocks are translated to ST and soft_plc compiles the whole project; its first error is underlined in place in an ST block, or shown under its network in a KOP block. Tick **ST** in a KOP block's toolbar to see its translation next to the networks; **Export ST** writes the whole project as `<project>.st` for soft_plc. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. Closing with unsaved changes asks first.
+The window shows the blocks on the left (New block, Rename, Delete) and the open block on the right. A KOP block has its interface table (name, type, section, initial value, AT address, comment) above its networks. An ST block opens in a code editor with line numbers and colours. Whenever anything changes, the KOP blocks are translated to ST and soft_plc compiles the whole project; its first error is underlined in place in an ST block, or shown under its network in a KOP block. Tick **ST** in a KOP block's toolbar to see its translation next to the networks; **Export ST** writes the whole project as `<project>.st` for soft_plc. Problems in the project, such as two PROGRAMs or a variable declared twice, are listed under the blocks. A project that isn't saved anywhere yet (a blank one, or an uploaded one) asks for a folder the first time it's saved. Closing with unsaved changes asks first.
 
 ## Online
 
-**Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (**Export ST**, then `soft_plc --monitor=5020 <project>.st`). Online, the rungs show power flow as in TIA Portal: solid green where power flows, dashed blue where it doesn't, closed contacts green and open ones blue. Box pins show their values under their operands, and hovering a box lists all its pins, uncut; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
+**Simulate** runs the project in a soft_plc inside the editor (like PLCSIM); **Connect** goes online with a soft_plc you started yourself (`soft_plc --monitor=5020 program.st`). **Upload** then takes the program it runs into the editor, like an upload from the PLC in TIA Portal: one ST block per PROGRAM, FUNCTION_BLOCK, FUNCTION and TYPE, each with its text exactly as the PLC runs it, comments included. The uploaded project isn't saved anywhere yet; Save asks for a folder. Online, the rungs show power flow as in TIA Portal: solid green where power flows, dashed blue where it doesn't, closed contacts green and open ones blue. Box pins show their values under their operands, and hovering a box lists all its pins, uncut; ST lines (and the ST panel of a KOP block) show their variables' values at the end of the line. A function block is watched through one of its instances, chosen in the Instance combo.
 
 To change a value: double-click a contact or coil to flip its operand, or select it and use **Set TRUE/FALSE** (written once) or **Force TRUE/FALSE** (held every cycle, until **Unforce**). In the simulator, inputs keep what you set; a real soft_plc reads its inputs every cycle, so there inputs must be forced. When the project changes, **Download** loads it into the running PLC between two cycles, like a download in RUN in TIA Portal: every variable that's still there keeps its value (a running timer goes on timing, a counter keeps its count), and the header lists the ones that start at their initial value (new, or with a changed type). It works with a standalone soft_plc too. **Restart** (simulator only) starts over with every value reset.
 

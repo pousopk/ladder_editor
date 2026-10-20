@@ -1,6 +1,7 @@
 #include "app/project_window.hpp"
 #include "app/st_display.hpp"
 #include "ladder/project_file.hpp"
+#include "ladder/st_split.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fmt/format.h>
@@ -39,13 +40,21 @@ std::string upper(std::string_view text) {
 
 ProjectWindow::ProjectWindow(Project project, std::filesystem::path folder)
     : project_(std::move(project)), folder_(std::move(folder)) {
+    makeEditors();
+    savedWatch_ = project_.watch;
+}
+
+void ProjectWindow::makeEditors() {
+    editors_.clear();
+    codeEditors_.clear();
+    coloredVersion_.clear();
+    savedSources_.clear();
     for (const auto& block : project_.blocks) {
         editors_.push_back(block.language == Language::Kop ? std::make_unique<KopEditor>() : nullptr);
         codeEditors_.push_back(codeEditorFor(block));
         coloredVersion_.push_back(static_cast<std::size_t>(-1)); // not coloured yet
         savedSources_.push_back(block.source);
     }
-    savedWatch_ = project_.watch;
 }
 
 bool ProjectWindow::blockModified(std::size_t index) const {
@@ -98,24 +107,27 @@ void ProjectWindow::draw() {
     drawRenamePopup();
     drawDeletePopup();
     drawClosePopup();
+    drawSavePopup();
+    drawUploadPopup();
     ImGui::End();
 }
 
 void ProjectWindow::drawHeader() {
     ImGui::Text("%s", project_.name.c_str());
     ImGui::SameLine();
-    ImGui::TextColored(kDim, "%s", folder_.empty() ? "(built-in example, not saved)" : folder_.string().c_str());
+    ImGui::TextColored(kDim, "%s", folder_.empty() ? "(not saved yet)" : folder_.string().c_str());
     if (modified()) {
         ImGui::SameLine(0, 2);
         ImGui::TextUnformatted("*");
     }
     ImGui::SameLine();
-    ImGui::BeginDisabled(folder_.empty());
     if (ImGui::Button("Save")) {
         save();
     }
     ImGui::SetItemTooltip("Save every block of the project (Ctrl+S)");
+    widgets_.remember("save");
     ImGui::SameLine();
+    ImGui::BeginDisabled(folder_.empty());
     if (ImGui::Button("Export ST")) {
         exportSt();
     }
@@ -320,8 +332,8 @@ void ProjectWindow::drawOnline() {
         if (ImGui::Button("Connect")) {
             connect(static_cast<std::uint16_t>(port_));
         }
-        ImGui::SetItemTooltip("Go online with a soft_plc already running this project:\n"
-                              "export it, then run  soft_plc --monitor=%d <project>.st",
+        ImGui::SetItemTooltip("Go online with a soft_plc started with --monitor=%d:\n"
+                              "Upload takes its program, Download sends this project",
                               port_);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(110.0F);
@@ -344,14 +356,31 @@ void ProjectWindow::drawOnline() {
         return;
     }
     widgets_.remember("go offline");
+    if (!status.connected && (uploadPending_ || pendingDownload_)) {
+        status_ = uploadPending_ ? "Upload failed: connection lost" : "Download failed: connection lost";
+        uploadPending_ = false;
+        pendingDownload_.reset();
+    }
     checkDownload();
+    checkUpload();
+    if (status.connected && !simulator_) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(uploadPending_ || pendingDownload_.has_value());
+        if (ImGui::Button("Upload")) {
+            upload();
+        }
+        ImGui::SetItemTooltip("Replace the project with the program the PLC runs: one ST block per PROGRAM, "
+                              "FUNCTION_BLOCK, FUNCTION and TYPE");
+        widgets_.remember("upload");
+        ImGui::EndDisabled();
+    }
     if (status.connected && (!downloaded_ || *downloaded_ != project_)) {
         ImGui::SameLine();
         ImGui::TextColored(kStop, "%s",
                            downloaded_ ? "The PLC runs an older version."
                                        : "The PLC runs a version this editor didn't load.");
         ImGui::SameLine();
-        ImGui::BeginDisabled(pendingDownload_.has_value());
+        ImGui::BeginDisabled(pendingDownload_.has_value() || uploadPending_);
         if (ImGui::Button("Download")) {
             download();
         }
@@ -427,9 +456,98 @@ bool ProjectWindow::download() {
         status_ = "soft_plc can't compile the project yet: fix the errors first.";
         return false;
     }
+    if (uploadPending_ || pendingDownload_) {
+        return false; // one at a time
+    }
     session_->load(check_.translation.text);
     pendingDownload_ = project_;
     return true;
+}
+
+bool ProjectWindow::upload() {
+    if (!session_ || simulator_ || uploadPending_ || pendingDownload_) {
+        return false;
+    }
+    if (modified()) {
+        askUpload_ = true;
+        return false;
+    }
+    startUpload();
+    return true;
+}
+
+void ProjectWindow::startUpload() {
+    session_->requestSource();
+    uploadPending_ = true;
+}
+
+// An upload's answer, once it's there.
+void ProjectWindow::checkUpload() {
+    if (!uploadPending_ || !session_) {
+        return;
+    }
+    const auto result = session_->lastSource();
+    if (!result || result->number <= uploadsSeen_) {
+        return;
+    }
+    uploadsSeen_ = result->number;
+    uploadPending_ = false;
+    if (!result->ok) {
+        status_ = "Upload failed: " + result->message;
+        return;
+    }
+    auto uploaded = projectFromSt(result->source);
+    if (!uploaded) {
+        status_ = "Upload failed: " + uploaded.error();
+        return;
+    }
+    replaceProject(std::move(*uploaded));
+    downloaded_ = project_; // the PLC runs exactly this
+    status_.clear();
+    note_ = fmt::format("Uploaded {} blocks from the PLC.", project_.blocks.size());
+}
+
+void ProjectWindow::replaceProject(Project project) {
+    project_ = std::move(project);
+    folder_.clear();
+    makeEditors();
+    std::fill(savedSources_.begin(), savedSources_.end(), std::string()); // never saved: every block is new
+    savedWatch_ = project_.watch;
+    structureModified_ = true;
+    current_ = 0;
+    for (std::size_t i = 0; i < project_.blocks.size(); ++i) {
+        if (project_.blocks[i].kind == BlockKind::Program) {
+            current_ = i;
+        }
+    }
+    showWatch_ = false;
+    instances_.clear();
+    instance_.reset();
+    checked_.reset();
+}
+
+void ProjectWindow::drawUploadPopup() {
+    if (askUpload_) {
+        ImGui::OpenPopup("Replace the project?");
+        askUpload_ = false;
+    }
+    if (!ImGui::BeginPopupModal("Replace the project?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+    ImGui::TextUnformatted("The project has changes that aren't saved. Upload replaces it with the PLC's program.");
+    if (ImGui::Button("Upload anyway")) {
+        if (session_ && !uploadPending_ && !pendingDownload_) {
+            startUpload();
+        }
+        ImGui::CloseCurrentPopup();
+    }
+    widgets_.remember("upload anyway");
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        ImGui::CloseCurrentPopup();
+    }
+    widgets_.remember("upload cancel");
+    ImGui::EndPopup();
 }
 
 // A download's answer, once it's there.
@@ -463,6 +581,8 @@ void ProjectWindow::goOffline() {
     downloaded_.reset();
     pendingDownload_.reset();
     loadsSeen_ = 0;
+    uploadPending_ = false;
+    uploadsSeen_ = 0;
     watching_.clear();
 }
 
@@ -626,12 +746,12 @@ void ProjectWindow::drawClosePopup() {
         return;
     }
     ImGui::TextUnformatted("The project has changes that aren't saved.");
-    ImGui::BeginDisabled(folder_.empty());
     if (ImGui::Button("Save and quit")) {
+        quitAfterSave_ = folder_.empty(); // the Save project popup quits once it has saved
         closeConfirmed_ = save();
         ImGui::CloseCurrentPopup();
     }
-    ImGui::EndDisabled();
+    widgets_.remember("save and quit");
     ImGui::SameLine();
     if (ImGui::Button("Quit without saving")) {
         closeConfirmed_ = true;
@@ -645,11 +765,73 @@ void ProjectWindow::drawClosePopup() {
     ImGui::EndPopup();
 }
 
+// Where to save a project that has no folder yet.
+void ProjectWindow::drawSavePopup() {
+    if (openSave_) {
+        ImGui::OpenPopup("Save project");
+        saveFolder_ = (std::filesystem::current_path() / project_.name).string();
+        openSave_ = false;
+    }
+    if (!ImGui::BeginPopupModal("Save project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+    if (ImGui::IsWindowAppearing()) {
+        ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(500.0F);
+    ImGui::InputTextWithHint("Folder", "e.g. /home/me/plc/conveyor", &saveFolder_);
+    widgets_.remember("save folder");
+    std::error_code error;
+    std::filesystem::path folder(saveFolder_);
+    if (folder.filename().empty()) {
+        folder = folder.parent_path(); // typed with a trailing /
+    }
+    const bool taken = !saveFolder_.empty() && std::filesystem::exists(folder / "project.json", error);
+    if (taken) {
+        ImGui::TextColored(kStop, "That folder already holds a project: saving replaces it.");
+        widgets_.remember("overwrite warning");
+    }
+    if (!status_.empty()) {
+        ImGui::TextColored(kProblem, "%s", status_.c_str());
+    }
+    const bool valid = !folder.filename().empty();
+    ImGui::BeginDisabled(!valid);
+    if (ImGui::Button(taken ? "Overwrite" : "Save") || (valid && ImGui::IsKeyPressed(ImGuiKey_Enter))) {
+        // The project takes the folder's name, as when ladder_editor opens a new folder.
+        const auto previousName = project_.name;
+        project_.name = folder.filename().string();
+        folder_ = folder;
+        if (save()) {
+            // Online, the PLC still runs this project: only its name changed.
+            for (auto* running : {&downloaded_, &pendingDownload_}) {
+                if (*running) {
+                    (*running)->name = project_.name;
+                }
+            }
+            closeConfirmed_ = quitAfterSave_;
+            quitAfterSave_ = false;
+            ImGui::CloseCurrentPopup();
+        } else {
+            project_.name = previousName;
+            folder_.clear();
+        }
+    }
+    widgets_.remember("save here");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        quitAfterSave_ = false;
+        ImGui::CloseCurrentPopup();
+    }
+    widgets_.remember("save cancel");
+    ImGui::EndPopup();
+}
+
 // ---------------------------------------------------------------- Actions
 
 bool ProjectWindow::save() {
     if (folder_.empty()) {
-        status_ = "This is the built-in example: start ladder_editor with a folder to save a project.";
+        openSave_ = true;
         return false;
     }
     auto saved = saveProject(project_, folder_);

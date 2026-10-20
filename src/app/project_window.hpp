@@ -28,13 +28,17 @@ namespace app {
 class ProjectWindow {
 public:
     // `folder` is where the project is saved; empty when it isn't saved
-    // anywhere (the built-in example).
+    // anywhere yet (then saving asks where).
     ProjectWindow(ladder::Project project, std::filesystem::path folder);
 
     void draw();
 
     bool modified() const;
+    // Saves every block. With no folder yet, it asks where first (and
+    // returns false: the popup saves).
+    bool save();
     const ladder::Project& project() const { return project_; }
+    const std::filesystem::path& folder() const { return folder_; } // empty: not saved anywhere yet
     std::size_t currentBlock() const { return current_; }
     bool showingWatchTable() const { return showWatch_; }
     const WatchTable& watchTable() const { return watchTable_; }
@@ -62,6 +66,11 @@ public:
     // a moment later (the header shows it).
     bool download();
     bool downloadPending() const { return pendingDownload_.has_value(); }
+    // Upload: replaces the project with the program the connected PLC runs,
+    // one ST block per declaration. Asks first when the project has unsaved
+    // changes. The answer comes a moment later.
+    bool upload();
+    bool uploadPending() const { return uploadPending_; }
     const std::string& note() const { return note_; }
     const std::string& status() const { return status_; }
     void goOffline();
@@ -87,12 +96,18 @@ private:
     void drawOnline();
     void updateWatch(const std::vector<std::string>& paths);
     void checkDownload();
+    void startUpload();
+    void checkUpload();
+    void drawUploadPopup();
+    // Swaps in an uploaded project: not saved anywhere, every block new.
+    void replaceProject(ladder::Project project);
+    void makeEditors(); // one KOP or code editor per block, as the project is now
     // Online: the instance a FUNCTION_BLOCK is shown from, chosen in a combo.
     // Nothing when the block can't be watched (a FUNCTION, an unused FB).
     std::optional<std::string> chooseInstance(const ladder::Block& block);
     void exportSt();
 
-    bool save();
+    void drawSavePopup();
     void addBlock(ladder::Block block);
     void deleteBlock(std::size_t index);
     bool blockModified(std::size_t index) const;
@@ -118,6 +133,8 @@ private:
     std::optional<ladder::Project> downloaded_;      // the project as the PLC runs it, if this editor loaded it
     std::optional<ladder::Project> pendingDownload_; // sent, waiting for soft_plc's answer
     std::uint64_t loadsSeen_ = 0;                    // the session's loads already handled
+    bool uploadPending_ = false;                     // SOURCE sent, waiting for soft_plc's answer
+    std::uint64_t uploadsSeen_ = 0;                  // the session's SOURCE answers already handled
     std::vector<std::string> watching_;              // what the session reads
     std::map<std::string, std::string> instances_;   // per FUNCTION_BLOCK: the instance shown
     std::optional<std::string> instance_;
@@ -133,6 +150,10 @@ private:
     bool openDelete_ = false;
     bool askClose_ = false;
     bool closeConfirmed_ = false;
+    bool openSave_ = false;
+    bool askUpload_ = false;
+    bool quitAfterSave_ = false; // Save and quit is waiting for the Save project popup
+    std::string saveFolder_;
     std::string newName_;
     int newKind_ = 0;
     int newLanguage_ = 0;

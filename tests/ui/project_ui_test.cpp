@@ -119,6 +119,102 @@ TEST_CASE("Quitting with unsaved changes asks first") {
     CHECK(ui.window().closeConfirmed());
 }
 
+// ---------------------------------------------------------------- Saving a project with no folder
+
+namespace {
+
+bool showing(Ui& ui, const char* widget) { return ui.window().widgets().center(widget).has_value(); }
+
+// Types `folder` into the Save project popup, over what's there.
+void typeFolder(Ui& ui, const fs::path& folder) {
+    ui.key(ImGuiKey_A, ImGuiKey_LeftCtrl);
+    ui.type(folder.string().c_str());
+}
+
+} // namespace
+
+TEST_CASE("A project with no folder asks where to save it, then saves there") {
+    const auto folder = freshFolder("mine");
+    Ui ui(newProject("untitled"), "");
+    ui.clickWidget("save");
+    REQUIRE(showing(ui, "save folder"));
+    typeFolder(ui, folder);
+    ui.clickWidget("save here");
+    CHECK(ui.window().status().empty());
+    CHECK(ui.window().folder() == folder);
+    CHECK(ui.window().project().name == "mine");
+    CHECK(fs::exists(folder / "project.json"));
+    CHECK_FALSE(ui.window().modified());
+    ui.frame();
+    CHECK_FALSE(showing(ui, "save folder")); // the popup closed
+}
+
+TEST_CASE("A folder typed with a trailing slash still saves") {
+    const auto folder = freshFolder("slash");
+    Ui ui(newProject("untitled"), "");
+    ui.clickWidget("save");
+    typeFolder(ui, folder.string() + "/");
+    ui.clickWidget("save here");
+    CHECK(ui.window().project().name == "slash");
+    CHECK(fs::exists(folder / "project.json"));
+}
+
+TEST_CASE("Ctrl+S on a project with no folder asks where to save it") {
+    Ui ui(newProject("untitled"), "");
+    ui.key(ImGuiKey_S, ImGuiKey_LeftCtrl);
+    ui.frame();
+    CHECK(showing(ui, "save folder"));
+    ui.clickWidget("save cancel");
+    CHECK_FALSE(showing(ui, "save folder"));
+    CHECK(ui.window().folder().empty());
+}
+
+TEST_CASE("Saving over a folder that holds a project asks for Overwrite") {
+    const auto folder = freshFolder("taken");
+    REQUIRE(saveProject(twoBlocks(), folder).has_value());
+    Ui ui(newProject("untitled"), "");
+    ui.clickWidget("save");
+    typeFolder(ui, folder);
+    ui.frame();
+    CHECK(showing(ui, "overwrite warning"));
+    ui.clickWidget("save here");
+    const auto loaded = loadProject(folder);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->blocks == ui.window().project().blocks);
+}
+
+TEST_CASE("A folder that can't be written keeps the popup open") {
+    const auto parent = freshFolder("blocked");
+    fs::create_directories(parent);
+    std::ofstream(parent / "file") << "not a folder";
+    Ui ui(newProject("untitled"), "");
+    ui.clickWidget("save");
+    typeFolder(ui, parent / "file" / "sub");
+    ui.clickWidget("save here");
+    CHECK_FALSE(ui.window().status().empty());
+    ui.frame();
+    CHECK(showing(ui, "save folder"));
+    CHECK(ui.window().folder().empty());
+}
+
+TEST_CASE("Quitting a project with no folder: Save and quit asks where, then quits") {
+    const auto folder = freshFolder("quit");
+    Ui ui(twoBlocks(), "");
+    ui.clickWidget("+ variable");
+    REQUIRE(ui.window().modified());
+    ui.window().askToClose();
+    ui.frame();
+    ui.frame();
+    ui.clickWidget("save and quit");
+    ui.frame();
+    CHECK_FALSE(ui.window().closeConfirmed());
+    REQUIRE(showing(ui, "save folder"));
+    typeFolder(ui, folder);
+    ui.clickWidget("save here");
+    CHECK(ui.window().closeConfirmed());
+    CHECK(fs::exists(folder / "project.json"));
+}
+
 // ---------------------------------------------------------------- The ST code editor
 
 namespace {

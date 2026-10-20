@@ -81,6 +81,17 @@ public:
     };
     std::optional<LoadResult> lastLoad() const;
 
+    // Upload: asks soft_plc for the program it runs (SOURCE). The answer
+    // comes later, in lastSource().
+    void requestSource();
+    struct SourceResult {
+        std::uint64_t number = 0; // 1 for the first request, 2 for the next, ...
+        bool ok = false;
+        std::string source;  // the program, when ok
+        std::string message; // soft_plc's reply, when not
+    };
+    std::optional<SourceResult> lastSource() const;
+
     PlcStatus status() const;
     // The forced variables and their values, as soft_plc reports them.
     std::map<std::string, std::string> forces() const;
@@ -104,6 +115,7 @@ private:
     std::map<std::string, std::string> forces_;
     std::optional<std::map<std::string, Variable>> variables_; // by path in upper case, once listed
     std::optional<LoadResult> lastLoad_;
+    std::optional<SourceResult> lastSource_;
     PlcStatus status_;
 
     std::thread thread_; // last: started once everything else exists

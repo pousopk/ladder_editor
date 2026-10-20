@@ -65,6 +65,14 @@ TEST_CASE("New blocks start with something to work on") {
     CHECK(newBlock("Scale", BlockKind::Function, Language::Kop).returnType == "BOOL");
 }
 
+TEST_CASE("A new project has one empty KOP PROGRAM, Main") {
+    const auto project = newProject("untitled");
+    CHECK(project.name == "untitled");
+    REQUIRE(project.blocks.size() == 1);
+    CHECK(project.blocks[0] == newBlock("Main", BlockKind::Program, Language::Kop));
+    CHECK(project.watch.empty());
+}
+
 TEST_CASE("A project saves to a folder and loads back the same") {
     const auto folder = freshFolder("round_trip");
     auto project = sample();

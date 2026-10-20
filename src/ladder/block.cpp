@@ -131,6 +131,13 @@ Block newBlock(std::string name, BlockKind kind, Language language) {
     return block;
 }
 
+Project newProject(std::string name) {
+    Project project;
+    project.name = std::move(name);
+    project.blocks.push_back(newBlock("Main", BlockKind::Program, Language::Kop));
+    return project;
+}
+
 std::vector<ProjectProblem> checkProject(const Project& project) {
     std::vector<ProjectProblem> problems;
     const auto add = [&](const std::string& block, std::string message) {

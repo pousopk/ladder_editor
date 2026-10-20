@@ -1,11 +1,10 @@
 // ladder_editor: edits a project of KOP and ST blocks.
 //
-//   ladder_editor                       the built-in example (can't be saved)
+//   ladder_editor                       a blank project; Ctrl+S asks where to save it
 //   ladder_editor examples/conveyor     open a project folder; Ctrl+S saves it
 //   ladder_editor myproject             a folder without a project yet: start a new one
 //   ladder_editor --simulate ...        and go online at once, in the simulator
 //   ladder_editor --connect=5020 ...    and go online with the soft_plc monitoring on that port
-#include "app/example.hpp"
 #include "app/project_window.hpp"
 #include "ladder/block.hpp"
 #include "ladder/project_file.hpp"
@@ -21,7 +20,7 @@
 
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
-    fs::path folder; // empty: the built-in example
+    fs::path folder; // empty: not saved anywhere yet
     ladder::Project project;
     bool simulate = false;
     int connectPort = 0;
@@ -48,13 +47,11 @@ int main(int argc, char** argv) {
             }
             project = std::move(*loaded);
         } else {
-            // A new project: one KOP PROGRAM to start with. Nothing is
-            // written until it's saved.
-            project.name = folder.filename().string();
-            project.blocks.push_back(ladder::newBlock("Main", ladder::BlockKind::Program, ladder::Language::Kop));
+            // A new project. Nothing is written until it's saved.
+            project = ladder::newProject(folder.filename().string());
         }
     } else if (argc == 1) {
-        project = app::exampleProject();
+        project = ladder::newProject("untitled");
     } else {
         std::fprintf(stderr, "usage: ladder_editor [--simulate | --connect=PORT] [project folder]\n");
         return 2;

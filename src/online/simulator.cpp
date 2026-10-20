@@ -52,7 +52,8 @@ tl::expected<std::unique_ptr<Simulator>, std::string> Simulator::start(std::stri
     } catch (const std::system_error& error) {
         return tl::unexpected(std::string("can't start monitoring: ") + error.what());
     }
-    state->service = std::make_unique<softplc::monitor::MonitorService>(*state->program, state->image, *state->cycle);
+    state->service = std::make_unique<softplc::monitor::MonitorService>(*state->program, state->image, *state->cycle,
+                                                                     std::string(source));
     auto* s = state.get();
     s->cycle->setIdleTask(
         [s] { s->server->processPending([s](std::string_view request) { return s->service->handle(request); }); });

@@ -89,6 +89,9 @@ bool isIdentifier(std::string_view text);
 // or an ST block with a skeleton to fill in.
 Block newBlock(std::string name, BlockKind kind, Language language);
 
+// A new project as the editor starts it: one empty KOP PROGRAM, Main.
+Project newProject(std::string name);
+
 struct ProjectProblem {
     std::string block; // the block it's in; empty for the project as a whole
     std::string message;

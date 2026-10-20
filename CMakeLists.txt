@@ -68,6 +68,7 @@ add_library(ladder_core STATIC
   src/ladder/block.cpp
   src/ladder/project_file.cpp
   src/ladder/translate.cpp
+  src/ladder/st_split.cpp
   src/ladder/power.cpp
   src/text/text_document.cpp
 )
@@ -117,7 +118,6 @@ ladder_editor_mark_system(imgui_core)
 add_library(ladder_ui STATIC
   src/app/kop_editor.cpp
   src/app/project_window.cpp
-  src/app/example.cpp
   src/app/watch_table.cpp
   src/app/st_display.cpp
   src/view/rung_view.cpp

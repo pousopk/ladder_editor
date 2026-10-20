@@ -27,6 +27,20 @@ std::vector<std::string> words(std::string_view text) {
     return result;
 }
 
+// SOURCE's reply: \n is a line end, \\ a backslash.
+std::string unescape(std::string_view text) {
+    std::string result;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size()) {
+            ++i;
+            result += text[i] == 'n' ? '\n' : text[i];
+        } else {
+            result += text[i];
+        }
+    }
+    return result;
+}
+
 bool ok(std::string_view reply) {
     return reply == "OK" || reply.rfind("OK ", 0) == 0;
 }
@@ -130,6 +144,13 @@ std::optional<Session::LoadResult> Session::lastLoad() const {
     return lastLoad_;
 }
 
+void Session::requestSource() { send("SOURCE"); }
+
+std::optional<Session::SourceResult> Session::lastSource() const {
+    std::lock_guard lock(mutex_);
+    return lastSource_;
+}
+
 PlcStatus Session::status() const {
     std::lock_guard lock(mutex_);
     return status_;
@@ -213,6 +234,20 @@ bool Session::exchange() {
             std::lock_guard lock(mutex_);
             result.number = lastLoad_ ? lastLoad_->number + 1 : 1;
             lastLoad_ = std::move(result);
+            continue;
+        }
+        if (command == "SOURCE") {
+            // OK PROGRAM Main\nVAR\n...
+            SourceResult result;
+            result.ok = ok(*reply);
+            if (result.ok) {
+                result.source = unescape(std::string_view(*reply).substr(std::min<std::size_t>(3, reply->size())));
+            } else {
+                result.message = *reply;
+            }
+            std::lock_guard lock(mutex_);
+            result.number = lastSource_ ? lastSource_->number + 1 : 1;
+            lastSource_ = std::move(result);
             continue;
         }
         if (!ok(*reply)) {

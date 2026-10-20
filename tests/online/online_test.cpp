@@ -163,3 +163,19 @@ TEST_CASE("Online change through the session: values are kept, new variables lis
     CHECK(online.session->lastLoad()->message.find("nothing") != std::string::npos);
     CHECK(online.session->status().running); // the old program goes on
 }
+
+TEST_CASE("Upload through the session: the running program's source, after a load too") {
+    Online online(kProgram);
+    online.session->requestSource();
+    REQUIRE(eventually([&] { return online.session->lastSource().has_value(); }));
+    CHECK(online.session->lastSource()->ok);
+    CHECK(online.session->lastSource()->number == 1);
+    CHECK(online.session->lastSource()->source == kProgram);
+
+    std::string changed = std::string("// a \\ backslash\n") + kProgram;
+    online.session->load(changed);
+    REQUIRE(eventually([&] { return online.session->lastLoad().has_value(); }));
+    online.session->requestSource();
+    REQUIRE(eventually([&] { return online.session->lastSource()->number == 2; }));
+    CHECK(online.session->lastSource()->source == changed);
+}
